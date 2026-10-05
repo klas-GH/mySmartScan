@@ -2337,6 +2337,149 @@ function downloadBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+const SHARE_RESULT = {
+  SHARED: "shared",
+  CANCELLED: "cancelled",
+  UNSUPPORTED: "unsupported"
+};
+
+function createExportFile(blob, fileName) {
+  try {
+    return new File([blob], fileName, {
+      type: blob.type,
+      lastModified: Date.now()
+    });
+  } catch (error) {
+    console.error("SmartScan could not build a shareable file:", error);
+    return null;
+  }
+}
+
+function canShareFiles(files) {
+  if (!files.length) {
+    return false;
+  }
+
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  if (typeof navigator.share !== "function") {
+    return false;
+  }
+
+  if (typeof navigator.canShare !== "function") {
+    return false;
+  }
+
+  try {
+    return navigator.canShare({ files }) === true;
+  } catch (error) {
+    return false;
+  }
+}
+
+/*
+ * Share support can only be confirmed against a real File, so the
+ * export sheet probes with a tiny throwaway file.
+ */
+function canShareExportedFile() {
+  const probe = createExportFile(
+    new Blob([new Uint8Array([0])], { type: "application/pdf" }),
+    "smartscan-probe.pdf"
+  );
+
+  return probe ? canShareFiles([probe]) : false;
+}
+
+async function shareExports(exports) {
+  const files = exports
+    .map(item => createExportFile(item.blob, item.fileName))
+    .filter(Boolean);
+
+  if (!files.length) {
+    return SHARE_RESULT.UNSUPPORTED;
+  }
+
+  let shareable = canShareFiles(files);
+
+  // Some platforms refuse more than one file; retry with the first.
+  if (!shareable && files.length > 1) {
+    shareable = canShareFiles([files[0]]);
+
+    if (shareable) {
+      files.length = 1;
+    }
+  }
+
+  if (!shareable) {
+    return SHARE_RESULT.UNSUPPORTED;
+  }
+
+  try {
+    await navigator.share({
+      files,
+      title: files[0].name
+    });
+
+    return SHARE_RESULT.SHARED;
+
+  } catch (error) {
+    // The user dismissed the sheet, so do not download behind their back.
+    if (error && error.name === "AbortError") {
+      return SHARE_RESULT.CANCELLED;
+    }
+
+    console.error("SmartScan share failed, falling back to download:", error);
+
+    return SHARE_RESULT.UNSUPPORTED;
+  }
+}
+
+async function downloadExports(exports) {
+  const many = exports.length > 1;
+
+  for (let index = 0; index < exports.length; index++) {
+    downloadBlob(exports[index].blob, exports[index].fileName);
+
+    // Browsers throttle back-to-back automatic downloads.
+    if (many && index < exports.length - 1) {
+      await wait(180);
+    }
+  }
+}
+
+async function deliverExports(exports, mode, formatLabel, pageCount) {
+  const summary =
+    ` ${pageCount} page${pageCount === 1 ? "" : "s"} as ${formatLabel}.`;
+
+  if (mode === "share") {
+    const outcome = await shareExports(exports);
+
+    if (outcome === SHARE_RESULT.SHARED) {
+      showToast("Shared" + summary);
+      return;
+    }
+
+    if (outcome === SHARE_RESULT.CANCELLED) {
+      return;
+    }
+  }
+
+  await downloadExports(exports);
+
+  showToast("Exported" + summary);
+}
+
+async function runExport(documentId, format, mode) {
+  if (format === "pdf") {
+    await exportDocumentPdf(documentId, mode);
+    return;
+  }
+
+  await exportDocumentImages(documentId, format, mode);
+}
+
 function beginExport() {
   if (app.busy) {
     showToast("An export is already running.");
@@ -2597,7 +2740,7 @@ function buildPdfBytes(images) {
   return concatBytes(chunks);
 }
 
-async function exportDocumentPdf(documentId) {
+async function exportDocumentPdf(documentId, mode = "download") {
   const doc = getDocument(documentId);
 
   if (!doc) {
@@ -2623,16 +2766,14 @@ async function exportDocumentPdf(documentId) {
       images.push(await readJpegImage(source));
     }
 
-    downloadBlob(
-      new Blob([buildPdfBytes(images)], {
+    const exports = [{
+      blob: new Blob([buildPdfBytes(images)], {
         type: "application/pdf"
       }),
-      exportFileName(doc.name, "pdf")
-    );
+      fileName: exportFileName(doc.name, "pdf")
+    }];
 
-    showToast(
-      `Exported ${images.length} page${images.length === 1 ? "" : "s"} as PDF.`
-    );
+    await deliverExports(exports, mode, "PDF", images.length);
 
   } catch (error) {
     console.error("SmartScan PDF export failed:", error);
@@ -2644,7 +2785,7 @@ async function exportDocumentPdf(documentId) {
   }
 }
 
-async function exportDocumentImages(documentId, extension) {
+async function exportDocumentImages(documentId, extension, mode = "download") {
   const doc = getDocument(documentId);
 
   if (!doc) {
@@ -2664,31 +2805,27 @@ async function exportDocumentImages(documentId, extension) {
   }
 
   const type = extension === "png" ? "image/png" : "image/jpeg";
+  const quality = type === "image/jpeg" ? 0.92 : undefined;
+
+  const many = sources.length > 1;
 
   try {
+    const exports = [];
+
     for (let index = 0; index < sources.length; index++) {
       const canvas = await renderPageToCanvas(sources[index]);
 
-      const blob = await canvasToBlob(
-        canvas,
-        type,
-        type === "image/jpeg" ? 0.92 : undefined
-      );
+      const blob = await canvasToBlob(canvas, type, quality);
 
-      const suffix = sources.length > 1 ? `-${index + 1}` : "";
+      const suffix = many ? `-${index + 1}` : "";
 
-      downloadBlob(blob, exportFileName(doc.name, extension, suffix));
-
-      // Browsers throttle back-to-back automatic downloads.
-      if (index < sources.length - 1) {
-        await wait(180);
-      }
+      exports.push({
+        blob,
+        fileName: exportFileName(doc.name, extension, suffix)
+      });
     }
 
-    showToast(
-      `Exported ${sources.length} page${sources.length === 1 ? "" : "s"}` +
-      ` as ${extension.toUpperCase()}.`
-    );
+    await deliverExports(exports, mode, extension.toUpperCase(), sources.length);
 
   } catch (error) {
     console.error(`SmartScan ${extension} export failed:`, error);
@@ -2709,6 +2846,8 @@ function showExportSheet(documentId) {
   }
 
   const pageCount = doc.pages.length;
+
+  const shareSupported = canShareExportedFile();
 
   let selectedFormat = getDefaultExportFormat();
 
@@ -2739,9 +2878,22 @@ function showExportSheet(documentId) {
             Cancel
           </button>
 
-          <button id="confirmExport" class="primary-btn">
-            Export
+          <button
+            id="confirmExport"
+            class="${shareSupported ? "secondary-btn" : "primary-btn"}"
+          >
+            ${shareSupported ? "Download" : "Export"}
           </button>
+
+          ${
+            shareSupported
+              ? `
+                <button id="shareExport" class="primary-btn">
+                  Share
+                </button>
+              `
+              : ""
+          }
         </div>
 
       </div>
@@ -2769,17 +2921,20 @@ function showExportSheet(documentId) {
     .getElementById("cancelExport")
     .addEventListener("click", closeModal);
 
-  document
+document
     .getElementById("confirmExport")
-    .addEventListener("click", async () => {
+    ?.addEventListener("click", async () => {
       closeModal();
 
-      if (selectedFormat === "pdf") {
-        await exportDocumentPdf(documentId);
-        return;
-      }
+      await runExport(documentId, selectedFormat, "download");
+    });
 
-      await exportDocumentImages(documentId, selectedFormat);
+  document
+    .getElementById("shareExport")
+    ?.addEventListener("click", async () => {
+      closeModal();
+
+      await runExport(documentId, selectedFormat, "share");
     });
 
   document
