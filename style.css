@@ -471,25 +471,6 @@ button:active {
   transform: perspective(500px) rotateX(3deg);
 }
 
-.scanner-label {
-  position: absolute;
-  top: 18px;
-  left: 18px;
-  right: 18px;
-
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.scanner-pill {
-  background: rgba(0,0,0,.45);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  padding: 7px 11px;
-  font-size: 11px;
-}
-
 .scanner-controls {
   padding: 8px 22px 30px;
 }
@@ -707,36 +688,6 @@ select {
   border-radius: 10px;
   padding: 8px;
   outline: none;
-}
-
-.toggle {
-  width: 45px;
-  height: 27px;
-  border-radius: 20px;
-  background: #cfd3dc;
-  position: relative;
-  transition: .2s;
-}
-
-.toggle::after {
-  content: "";
-  width: 21px;
-  height: 21px;
-  border-radius: 50%;
-  background: white;
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  transition: .2s;
-  box-shadow: 0 2px 4px rgba(0,0,0,.15);
-}
-
-.toggle.active {
-  background: var(--primary);
-}
-
-.toggle.active::after {
-  left: 21px;
 }
 
 /* ---------------------------------------------------------

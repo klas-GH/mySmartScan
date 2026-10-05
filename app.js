@@ -17,7 +17,6 @@ const defaultState = {
   settings: {
     theme: "system",
     defaultFilter: "original",
-    autoCapture: true,
     defaultExportFormat: "pdf"
   }
 };
@@ -232,7 +231,6 @@ function loadState() {
         settings: {
           theme: "system",
           defaultFilter: "original",
-          autoCapture: false,
           defaultExportFormat: "pdf"
         }
       };
@@ -253,8 +251,6 @@ function loadState() {
         theme: parsed.settings?.theme || "system",
         defaultFilter:
           parsed.settings?.defaultFilter || "original",
-        autoCapture:
-          parsed.settings?.autoCapture ?? false,
         defaultExportFormat:
           parsed.settings?.defaultExportFormat || "pdf"
       }
@@ -269,7 +265,6 @@ function loadState() {
       settings: {
         theme: "system",
         defaultFilter: "original",
-        autoCapture: false,
         defaultExportFormat: "pdf"
       }
     };
@@ -908,20 +903,11 @@ function renderScanner() {
   main.innerHTML = `
     <section class="scanner">
 
-      <div class="scanner-preview">
-        <div class="scanner-label">
-          <span class="scanner-pill">Document detection</span>
-          <span class="scanner-pill">V0 preview</span>
-        </div>
-      </div>
+      <div class="scanner-preview"></div>
 
       <div class="scanner-controls">
 
         <div class="scanner-top-controls">
-          <button class="scanner-control" id="flashBtn">
-            ◐
-          </button>
-
           <button class="scanner-control" id="galleryBtn">
             ▧
           </button>
@@ -972,12 +958,6 @@ function renderScanner() {
   document
     .getElementById("finishScanButton")
     ?.addEventListener("click", finishScanning);
-
-  document
-    .getElementById("flashBtn")
-    ?.addEventListener("click", () => {
-      showToast("Flash control will use the native camera in the next stage.");
-    });
 }
 
 
@@ -3157,19 +3137,6 @@ function renderSettings() {
 
         <div class="setting-row">
           <div class="setting-info">
-            <strong>Auto-capture</strong>
-            <small>Automatically capture detected documents.</small>
-          </div>
-
-          <button
-            id="autoCaptureToggle"
-            class="toggle ${state.settings.autoCapture ? "active" : ""}"
-            aria-label="Toggle auto capture"
-          ></button>
-        </div>
-
-        <div class="setting-row">
-          <div class="setting-info">
             <strong>Default export format</strong>
             <small>Used when exporting documents.</small>
           </div>
@@ -3251,16 +3218,6 @@ function renderSettings() {
     .addEventListener("change", event => {
       state.settings.defaultExportFormat = event.target.value;
       saveState();
-    });
-
-  document
-    .getElementById("autoCaptureToggle")
-    .addEventListener("click", () => {
-      state.settings.autoCapture =
-        !state.settings.autoCapture;
-
-      saveState();
-      renderSettings();
     });
 
   document
