@@ -214,6 +214,13 @@ function showToast(message) {
 }
 
 
+function wait(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -1728,7 +1735,7 @@ function renderDocumentEditor() {
       aria-label="Document title"
     />
 
-    <div style="display:flex;gap:8px;margin-bottom:18px;">
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
       <button id="addPageBtn" class="secondary-btn">
         ＋ Add page
       </button>
@@ -1737,6 +1744,14 @@ function renderDocumentEditor() {
         Save
       </button>
     </div>
+
+    <button
+      id="exportBtn"
+      class="secondary-btn"
+      style="width:100%;margin-bottom:18px;"
+    >
+      ⇩ Export as ${getDefaultExportFormat().toUpperCase()}
+    </button>
 
     ${
       doc.pages.length
@@ -1776,6 +1791,12 @@ function renderDocumentEditor() {
       doc.updatedAt = now();
       saveState();
       showToast("Document saved.");
+    });
+
+  document
+    .getElementById("exportBtn")
+    ?.addEventListener("click", () => {
+      showExportSheet(doc.id);
     });
 
   attachPageEvents(doc);
@@ -2229,6 +2250,529 @@ function deleteDocument(documentId) {
   }
 
   showToast("Document deleted.");
+}
+
+/* =========================================================
+   EXPORT
+   ---------------------------------------------------------
+   Minimal, dependency-free export layer.
+
+   PDF pages are the page JPEGs the editor already produces,
+   embedded as DCTDecode image XObjects, so no re-encoding
+   is needed for the common case.
+   ========================================================= */
+
+const PDF_PAGE_WIDTH = 595;
+const PDF_PAGE_HEIGHT = 842;
+
+const EXPORT_FORMATS = [
+  { id: "pdf", label: "PDF", hint: "One file, all pages" },
+  { id: "jpg", label: "JPG", hint: "One file per page" },
+  { id: "png", label: "PNG", hint: "One file per page" }
+];
+
+function getDefaultExportFormat() {
+  return EXPORT_FORMATS.some(
+    format => format.id === state.settings.defaultExportFormat
+  )
+    ? state.settings.defaultExportFormat
+    : "pdf";
+}
+
+function exportablePages(doc) {
+  return [...(doc?.pages || [])]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map(page => page.processedImagePath || page.originalImagePath)
+    .filter(Boolean);
+}
+
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+function exportFileName(name, extension, suffix = "") {
+  const base = String(name || "")
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .replace(/^[.\s]+|[.\s]+$/g, "");
+
+  const safe = !base
+    ? "document"
+    : WINDOWS_RESERVED_NAME.test(base)
+      ? `${base}-document`
+      : base;
+
+  return `${safe}${suffix}.${extension}`;
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function beginExport() {
+  if (app.busy) {
+    showToast("An export is already running.");
+    return false;
+  }
+
+  app.busy = true;
+  return true;
+}
+
+function endExport() {
+  app.busy = false;
+}
+
+function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => resolve(image);
+    image.onerror = () =>
+      reject(new Error("Could not load a page image."));
+
+    image.src = source;
+  });
+}
+
+function dataUrlToBytes(dataUrl) {
+  const marker = dataUrl.indexOf("base64,");
+
+  if (marker === -1) {
+    throw new Error("Unexpected image data.");
+  }
+
+  const binary = atob(dataUrl.slice(marker + 7));
+
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function bytesToLatin1(text) {
+  const bytes = new Uint8Array(text.length);
+
+  for (let index = 0; index < text.length; index++) {
+    bytes[index] = text.charCodeAt(index) & 0xff;
+  }
+
+  return bytes;
+}
+
+function concatBytes(chunks) {
+  let total = 0;
+
+  chunks.forEach(chunk => {
+    total += chunk.length;
+  });
+
+  const result = new Uint8Array(total);
+
+  let offset = 0;
+
+  chunks.forEach(chunk => {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return result;
+}
+
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+async function renderPageToCanvas(source) {
+  const image = await loadImageElement(source);
+
+  const canvas = document.createElement("canvas");
+
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    throw new Error("Image processing is unavailable.");
+  }
+
+  ctx.drawImage(image, 0, 0);
+
+  return canvas;
+}
+
+async function readJpegImage(source) {
+  const image = await loadImageElement(source);
+
+  if (/^data:image\/jpe?g;base64,/i.test(source)) {
+    return {
+      bytes: dataUrlToBytes(source),
+      width: image.naturalWidth,
+      height: image.naturalHeight
+    };
+  }
+
+  const canvas = await renderPageToCanvas(source);
+
+  return {
+    bytes: dataUrlToBytes(canvas.toDataURL("image/jpeg", 0.92)),
+    width: canvas.width,
+    height: canvas.height
+  };
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      blob => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(new Error("Image encoding failed."));
+      },
+      type,
+      quality
+    );
+  });
+}
+
+function buildPdfBytes(images) {
+  const chunks = [];
+
+  const offsets = [0];
+
+  let byteLength = 0;
+
+  const writeString = text => {
+    const bytes = bytesToLatin1(text);
+
+    chunks.push(bytes);
+    byteLength += bytes.length;
+  };
+
+  const writeBytes = bytes => {
+    chunks.push(bytes);
+    byteLength += bytes.length;
+  };
+
+  const beginObject = number => {
+    offsets[number] = byteLength;
+
+    writeString(`${number} 0 obj\n`);
+  };
+
+  const endObject = () => writeString("endobj\n");
+
+  const catalogNumber = 1;
+  const pagesNumber = 2;
+  const firstObject = 3;
+
+  const objectCount = 2 + images.length * 3;
+
+  writeString("%PDF-1.4\n");
+
+  // Binary marker so tools treat the file as binary.
+  writeBytes(
+    bytesToLatin1(String.fromCharCode(0x25, 0xc3, 0xa4, 0xc3, 0xbc, 0x0a))
+  );
+
+  beginObject(catalogNumber);
+  writeString(`<< /Type /Catalog /Pages ${pagesNumber} 0 R >>\n`);
+  endObject();
+
+  beginObject(pagesNumber);
+
+  const kids = images
+    .map((_, index) => `${firstObject + index * 3} 0 R`)
+    .join(" ");
+
+  writeString(
+    `<< /Type /Pages /Kids [${kids}] /Count ${images.length} >>\n`
+  );
+
+  endObject();
+
+  images.forEach((image, index) => {
+    const pageNumber = firstObject + index * 3;
+    const contentNumber = pageNumber + 1;
+    const imageNumber = pageNumber + 2;
+
+    // A4 page with the image centred and scaled to fit.
+    const scale = Math.min(
+      PDF_PAGE_WIDTH / image.width,
+      PDF_PAGE_HEIGHT / image.height
+    );
+
+    const drawWidth = round2(image.width * scale);
+    const drawHeight = round2(image.height * scale);
+
+    const offsetX = round2((PDF_PAGE_WIDTH - drawWidth) / 2);
+    const offsetY = round2((PDF_PAGE_HEIGHT - drawHeight) / 2);
+
+    const content =
+      `q\n${drawWidth} 0 0 ${drawHeight} ${offsetX} ${offsetY} cm\n` +
+      `/Im0 Do\nQ\n`;
+
+    beginObject(pageNumber);
+    writeString(
+      `<< /Type /Page /Parent ${pagesNumber} 0 R ` +
+      `/MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] ` +
+      `/Resources << /ProcSet [/PDF /ImageC] ` +
+      `/XObject << /Im0 ${imageNumber} 0 R >> >> ` +
+      `/Contents ${contentNumber} 0 R >>\n`
+    );
+
+    endObject();
+
+    beginObject(contentNumber);
+    writeString(`<< /Length ${content.length} >>\nstream\n`);
+    writeString(content);
+    writeString("\nendstream\n");
+    endObject();
+
+    beginObject(imageNumber);
+    writeString(
+      `<< /Type /XObject /Subtype /Image ` +
+      `/Width ${image.width} /Height ${image.height} ` +
+      `/ColorSpace /DeviceRGB /BitsPerComponent 8 ` +
+      `/Filter /DCTDecode ` +
+      `/Length ${image.bytes.length} >>\nstream\n`
+    );
+
+    writeBytes(image.bytes);
+    writeString("\nendstream\n");
+    endObject();
+  });
+
+  const startxref = byteLength;
+
+  writeString(`xref\n0 ${objectCount + 1}\n`);
+  writeString("0000000000 65535 f \n");
+
+  for (let number = 1; number <= objectCount; number++) {
+    writeString(
+      `${String(offsets[number]).padStart(10, "0")} 00000 n \n`
+    );
+  }
+
+  writeString(
+    `trailer\n<< /Size ${objectCount + 1} /Root ${catalogNumber} 0 R >>\n` +
+    `startxref\n${startxref}\n%%EOF\n`
+  );
+
+  return concatBytes(chunks);
+}
+
+async function exportDocumentPdf(documentId) {
+  const doc = getDocument(documentId);
+
+  if (!doc) {
+    showToast("Document not found.");
+    return;
+  }
+
+  const sources = exportablePages(doc);
+
+  if (!sources.length) {
+    showToast("This document has no pages to export.");
+    return;
+  }
+
+  if (!beginExport()) {
+    return;
+  }
+
+  try {
+    const images = [];
+
+    for (const source of sources) {
+      images.push(await readJpegImage(source));
+    }
+
+    downloadBlob(
+      new Blob([buildPdfBytes(images)], {
+        type: "application/pdf"
+      }),
+      exportFileName(doc.name, "pdf")
+    );
+
+    showToast(
+      `Exported ${images.length} page${images.length === 1 ? "" : "s"} as PDF.`
+    );
+
+  } catch (error) {
+    console.error("SmartScan PDF export failed:", error);
+
+    showToast("Could not generate the PDF.");
+
+  } finally {
+    endExport();
+  }
+}
+
+async function exportDocumentImages(documentId, extension) {
+  const doc = getDocument(documentId);
+
+  if (!doc) {
+    showToast("Document not found.");
+    return;
+  }
+
+  const sources = exportablePages(doc);
+
+  if (!sources.length) {
+    showToast("This document has no pages to export.");
+    return;
+  }
+
+  if (!beginExport()) {
+    return;
+  }
+
+  const type = extension === "png" ? "image/png" : "image/jpeg";
+
+  try {
+    for (let index = 0; index < sources.length; index++) {
+      const canvas = await renderPageToCanvas(sources[index]);
+
+      const blob = await canvasToBlob(
+        canvas,
+        type,
+        type === "image/jpeg" ? 0.92 : undefined
+      );
+
+      const suffix = sources.length > 1 ? `-${index + 1}` : "";
+
+      downloadBlob(blob, exportFileName(doc.name, extension, suffix));
+
+      // Browsers throttle back-to-back automatic downloads.
+      if (index < sources.length - 1) {
+        await wait(180);
+      }
+    }
+
+    showToast(
+      `Exported ${sources.length} page${sources.length === 1 ? "" : "s"}` +
+      ` as ${extension.toUpperCase()}.`
+    );
+
+  } catch (error) {
+    console.error(`SmartScan ${extension} export failed:`, error);
+
+    showToast(`Could not export the ${extension.toUpperCase()} page.`);
+
+  } finally {
+    endExport();
+  }
+}
+
+function showExportSheet(documentId) {
+  const doc = getDocument(documentId);
+
+  if (!doc) {
+    showToast("Document not found.");
+    return;
+  }
+
+  const pageCount = doc.pages.length;
+
+  let selectedFormat = getDefaultExportFormat();
+
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="exportBackdrop">
+      <div class="modal">
+
+        <h2>Export</h2>
+
+        <p>
+          ${escapeHtml(doc.name)} · ${pageCount} page${pageCount === 1 ? "" : "s"}
+        </p>
+
+        <div class="export-formats">
+          ${EXPORT_FORMATS.map(format => `
+            <button
+              class="export-format ${format.id === selectedFormat ? "active" : ""}"
+              data-export-format="${format.id}"
+            >
+              <strong>${format.label}</strong>
+              <small>${format.hint}</small>
+            </button>
+          `).join("")}
+        </div>
+
+        <div class="modal-actions">
+          <button id="cancelExport" class="secondary-btn">
+            Cancel
+          </button>
+
+          <button id="confirmExport" class="primary-btn">
+            Export
+          </button>
+        </div>
+
+      </div>
+    </div>
+  `;
+
+  document
+    .querySelectorAll("[data-export-format]")
+    .forEach(button => {
+      button.addEventListener("click", () => {
+        selectedFormat = button.dataset.exportFormat;
+
+        document
+          .querySelectorAll("[data-export-format]")
+          .forEach(item => {
+            item.classList.toggle(
+              "active",
+              item.dataset.exportFormat === selectedFormat
+            );
+          });
+      });
+    });
+
+  document
+    .getElementById("cancelExport")
+    .addEventListener("click", closeModal);
+
+  document
+    .getElementById("confirmExport")
+    .addEventListener("click", async () => {
+      closeModal();
+
+      if (selectedFormat === "pdf") {
+        await exportDocumentPdf(documentId);
+        return;
+      }
+
+      await exportDocumentImages(documentId, selectedFormat);
+    });
+
+  document
+    .getElementById("exportBackdrop")
+    .addEventListener("click", event => {
+      if (event.target.id === "exportBackdrop") {
+        closeModal();
+      }
+    });
 }
 
 /* =========================================================
