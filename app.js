@@ -598,7 +598,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V0</div>
+      <div class="hero-kicker">SMARTSCAN V1.0.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally.
@@ -3538,7 +3538,7 @@ function renderSettings() {
         <div class="setting-row">
           <div class="setting-info">
             <strong>${state.documents.length} documents</strong>
-            <small>Stored locally in this V0 build.</small>
+            <small>Stored locally on this device.</small>
           </div>
         </div>
 
@@ -3557,11 +3557,10 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V0</h2>
+        <h2>SmartScan V1.0.0</h2>
         <p>
-          Local-first foundation.
-          Camera processing, PDF generation and native sharing
-          will be added in later stages.
+          Local-first document scanning with multi-page capture,
+          editing, PDF/JPG/PNG export, and native sharing.
         </p>
       </div>
     </section>
