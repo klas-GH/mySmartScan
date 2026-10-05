@@ -531,6 +531,83 @@ button:active {
   box-shadow: 0 12px 35px rgba(0,0,0,.35);
 }
 
+/* ---------------------------------------------------------
+   Crop
+   --------------------------------------------------------- */
+
+.crop-stage {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.crop-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: move;
+  touch-action: none;
+}
+
+.crop-rect {
+  position: absolute;
+
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.55);
+  outline: 1px solid rgba(255,255,255,.9);
+
+  cursor: move;
+  touch-action: none;
+}
+
+.crop-handle {
+  position: absolute;
+
+  width: 30px;
+  height: 30px;
+
+  background: transparent;
+  border: 0;
+
+  touch-action: none;
+}
+
+.crop-handle::after {
+  content: "";
+  position: absolute;
+
+  width: 15px;
+  height: 15px;
+
+  border: 3px solid white;
+  border-radius: 3px;
+
+  background: rgba(49, 87, 232, .35);
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+
+.crop-handle[data-crop-handle="nw"] { top: 0; left: 0; }
+.crop-handle[data-crop-handle="nw"]::after {
+  top: 7px; left: 7px;
+  transform: translate(-50%, -50%);
+}
+
+.crop-handle[data-crop-handle="ne"] { top: 0; right: 0; }
+.crop-handle[data-crop-handle="ne"]::after {
+  top: 7px; right: 7px;
+  transform: translate(50%, -50%);
+}
+
+.crop-handle[data-crop-handle="sw"] { bottom: 0; left: 0; }
+.crop-handle[data-crop-handle="sw"]::after {
+  bottom: 7px; left: 7px;
+  transform: translate(-50%, 50%);
+}
+
+.crop-handle[data-crop-handle="se"] { bottom: 0; right: 0; }
+.crop-handle[data-crop-handle="se"]::after {
+  bottom: 7px; right: 7px;
+  transform: translate(50%, 50%);
+}
+
 .editor-tools {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -556,6 +633,17 @@ button:active {
 
 .tool-btn span:first-child {
   font-size: 19px;
+}
+
+.tool-btn.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.tool-btn[disabled] {
+  opacity: .4;
+  cursor: default;
 }
 
 .filter-row {

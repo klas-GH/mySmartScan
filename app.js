@@ -67,6 +67,23 @@ const app = {
   // Temporary image being edited
   pendingImage: null,
 
+  // Confirmed crop for a page that does not exist yet.
+  // Stored as a fraction of the original image, not pixels.
+  pendingCrop: null,
+
+  /*
+   * Filter forced onto a page that does not exist yet.
+   * Normally null, so a new page starts from settings.defaultFilter.
+   * Reset sets it to "original" so clearing edits means the same
+   * thing for a new page as it does for a saved one.
+   */
+  pendingFilter: null,
+
+  // Live crop rectangle while the crop overlay is open
+  cropDraft: null,
+
+  cropMode: false,
+
   // Scanner session
   scannerPages: [],
 
@@ -365,6 +382,10 @@ function getScannerPageCount() {
 function clearScannerSession() {
   app.scannerPages = [];
   app.pendingImage = null;
+  app.pendingCrop = null;
+  app.pendingFilter = null;
+  app.cropDraft = null;
+  app.cropMode = false;
   app.editingPageId = null;
   app.scannerActive = false;
 }
@@ -1154,6 +1175,12 @@ imageInput.addEventListener("change", async event => {
 
     app.pendingImage = imageData;
 
+    // A fresh capture starts with no crop.
+    app.pendingCrop = null;
+    app.pendingFilter = null;
+    app.cropDraft = null;
+    app.cropMode = false;
+
     navigate("page-editor");
   } catch (error) {
     console.error(error);
@@ -1238,8 +1265,251 @@ function filterStyle(filter) {
 }
 
 /*
+ * ---------------------------------------------------------
+   Crop
+   ---------------------------------------------------------
+   A crop is stored as fractions of the original image
+   ({x, y, w, h} between 0 and 1) rather than pixels, so it is
+   independent of preview size and of capture resolution, and it
+   can be re-applied to the pristine original on every re-edit.
+
+   Crop is applied first in the pipeline, then rotation, then filter.
+   ---------------------------------------------------------
+ */
+
+const FULL_CROP = { x: 0, y: 0, w: 1, h: 1 };
+const MIN_CROP = 0.05;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeCrop(crop) {
+  if (!crop) {
+    return null;
+  }
+
+  const x = clamp(crop.x, 0, 1);
+  const y = clamp(crop.y, 0, 1);
+
+  const box = {
+    x,
+    y,
+    w: clamp(crop.w, 0, 1 - x),
+    h: clamp(crop.h, 0, 1 - y)
+  };
+
+  // A rectangle covering the whole image is stored as "no crop".
+  const isFull =
+    box.x < 0.001 && box.y < 0.001 &&
+    box.w > 0.999 && box.h > 0.999;
+
+  return isFull ? null : box;
+}
+
+function getCropState() {
+  if (app.editingPageId && app.activeDocumentId) {
+    const page = getPage(
+      getDocument(app.activeDocumentId),
+      app.editingPageId
+    );
+
+    if (page) {
+      return page.crop || null;
+    }
+  }
+
+  return app.pendingCrop || null;
+}
+
+function setCropState(crop) {
+  if (app.editingPageId && app.activeDocumentId) {
+    const doc = getDocument(app.activeDocumentId);
+    const page = getPage(doc, app.editingPageId);
+
+    if (page) {
+      page.crop = crop || null;
+      doc.updatedAt = now();
+      saveState();
+      return;
+    }
+  }
+
+  app.pendingCrop = crop || null;
+}
+
+function resizeCrop(crop, corner, dx, dy) {
+  const next = { x: crop.x, y: crop.y, w: crop.w, h: crop.h };
+
+  if (corner === "move") {
+    next.x = clamp(crop.x + dx, 0, 1 - crop.w);
+    next.y = clamp(crop.y + dy, 0, 1 - crop.h);
+
+    return next;
+  }
+
+  // Dragging a corner changes the two edges that meet there.
+  if (corner === "nw" || corner === "sw") {
+    const right = crop.x + crop.w;
+    next.x = clamp(crop.x + dx, 0, right - MIN_CROP);
+    next.w = right - next.x;
+  }
+
+  if (corner === "ne" || corner === "se") {
+    next.w = clamp(crop.w + dx, MIN_CROP, 1 - crop.x);
+  }
+
+  if (corner === "nw" || corner === "ne") {
+    const bottom = crop.y + crop.h;
+    next.y = clamp(crop.y + dy, 0, bottom - MIN_CROP);
+    next.h = bottom - next.y;
+  }
+
+  if (corner === "sw" || corner === "se") {
+    next.h = clamp(crop.h + dy, MIN_CROP, 1 - crop.y);
+  }
+
+  return normalizeCrop(next) || FULL_CROP;
+}
+
+function renderCropOverlay() {
+  const rect = document.getElementById("cropRect");
+
+  if (!rect) {
+    return;
+  }
+
+  const crop = app.cropDraft || FULL_CROP;
+
+  rect.style.left = (crop.x * 100) + "%";
+  rect.style.top = (crop.y * 100) + "%";
+  rect.style.width = (crop.w * 100) + "%";
+  rect.style.height = (crop.h * 100) + "%";
+}
+
+function onCropPointerDown(event) {
+  const handle = event.target.closest("[data-crop-handle]");
+  const overlay = document.getElementById("cropOverlay");
+
+  if (!overlay) {
+    return;
+  }
+
+  const box = overlay.getBoundingClientRect();
+
+  if (!box.width || !box.height) {
+    return;
+  }
+
+  const corner = handle ? handle.dataset.cropHandle : "move";
+  const active = handle || document.getElementById("cropRect");
+
+  if (!active) {
+    return;
+  }
+
+  const origin = {
+    x: event.clientX,
+    y: event.clientY,
+    box,
+    crop: { ...(app.cropDraft || FULL_CROP) }
+  };
+
+  event.preventDefault();
+
+  try {
+    active.setPointerCapture(event.pointerId);
+  } catch (error) {
+    // Capture is an optimisation; dragging still works without it.
+  }
+
+  const move = moveEvent => {
+    const dx = (moveEvent.clientX - origin.x) / origin.box.width;
+    const dy = (moveEvent.clientY - origin.y) / origin.box.height;
+
+    app.cropDraft = resizeCrop(origin.crop, corner, dx, dy);
+
+    renderCropOverlay();
+  };
+
+  const stop = () => {
+    active.removeEventListener("pointermove", move);
+    active.removeEventListener("pointerup", stop);
+    active.removeEventListener("pointercancel", stop);
+  };
+
+  active.addEventListener("pointermove", move);
+  active.addEventListener("pointerup", stop);
+  active.addEventListener("pointercancel", stop);
+}
+
+function toggleCropMode() {
+  app.cropMode = !app.cropMode;
+  app.cropDraft = app.cropMode
+    ? { ...(getCropState() || FULL_CROP) }
+    : null;
+
+  renderPageEditor();
+}
+
+function applyCrop() {
+  setCropState(normalizeCrop(app.cropDraft));
+
+  app.cropMode = false;
+  app.cropDraft = null;
+
+  renderPageEditor();
+
+  showToast(getCropState() ? "Crop applied." : "Crop cleared.");
+}
+
+function cancelCrop() {
+  app.cropMode = false;
+  app.cropDraft = null;
+
+  renderPageEditor();
+}
+
+function cropOverlayMarkup() {
+  if (!app.cropMode) {
+    return "";
+  }
+
+  return `
+    <div class="crop-overlay" id="cropOverlay">
+      <div class="crop-rect" id="cropRect">
+        <button
+          class="crop-handle"
+          data-crop-handle="nw"
+          aria-label="Crop top left"
+        ></button>
+
+        <button
+          class="crop-handle"
+          data-crop-handle="ne"
+          aria-label="Crop top right"
+        ></button>
+
+        <button
+          class="crop-handle"
+          data-crop-handle="sw"
+          aria-label="Crop bottom left"
+        ></button>
+
+        <button
+          class="crop-handle"
+          data-crop-handle="se"
+          aria-label="Crop bottom right"
+        ></button>
+      </div>
+    </div>
+  `;
+}
+
+/*
  * Editing an existing page starts from its saved rotation and filter.
- * A new page starts from the configured default filter.
+ * A new page starts from the configured default filter, unless a reset
+ * has forced app.pendingFilter.
  *
  * The source image itself is chosen by whoever opened the editor
  * (app.pendingImage): a new capture, or a page's untouched
@@ -1262,7 +1532,7 @@ function getEditState() {
 
   return {
     rotation: 0,
-    filter: state.settings.defaultFilter || "original"
+    filter: app.pendingFilter || state.settings.defaultFilter || "original"
   };
 }
 
@@ -1274,6 +1544,8 @@ function renderPageEditor() {
 
   const edit = getEditState();
 
+  const hasCrop = !!getCropState();
+
   main.innerHTML = `
     <div class="page-heading">
       <h1>Edit page</h1>
@@ -1281,28 +1553,43 @@ function renderPageEditor() {
     </div>
 
     <div class="editor-preview">
-      <img
-        id="editorImage"
-        src="${app.pendingImage}"
-        alt="Scanned page"
-        data-rotation="${edit.rotation}"
-        data-filter="${edit.filter}"
-        style="
-          transform: rotate(${edit.rotation}deg);
-          filter: ${filterStyle(edit.filter)};
-        "
-      />
+      <div class="crop-stage">
+        <img
+          id="editorImage"
+          src="${app.pendingImage}"
+          alt="Scanned page"
+          data-rotation="${edit.rotation}"
+          data-filter="${edit.filter}"
+          style="
+            transform: ${
+              app.cropMode
+                ? "none"
+                : `rotate(${edit.rotation}deg)`
+            };
+            filter: ${filterStyle(edit.filter)};
+          "
+        />
+
+        ${cropOverlayMarkup()}
+      </div>
     </div>
 
     <div class="editor-tools">
-      <button class="tool-btn" id="rotateBtn">
+      <button
+        class="tool-btn"
+        id="rotateBtn"
+        ${app.cropMode ? "disabled" : ""}
+      >
         <span>↻</span>
         <span>Rotate</span>
       </button>
 
-      <button class="tool-btn" id="cropBtn">
+      <button
+        class="tool-btn ${app.cropMode ? "active" : ""}"
+        id="cropBtn"
+      >
         <span>⌗</span>
-        <span>Crop</span>
+        <span>${hasCrop ? "Crop ✓" : "Crop"}</span>
       </button>
 
       <button class="tool-btn" id="perspectiveBtn">
@@ -1329,16 +1616,56 @@ function renderPageEditor() {
       </div>
     </div>
 
-    <div style="display:flex;gap:9px;">
-      <button id="retakeBtn" class="secondary-btn" style="flex:1;">
-        Retake
-      </button>
+    ${
+      app.cropMode
+        ? `
+          <div style="display:flex;gap:9px;">
+            <button
+              id="cancelCropBtn"
+              class="secondary-btn"
+              style="flex:1;"
+            >
+              Cancel crop
+            </button>
 
-      <button id="savePageBtn" class="primary-btn" style="flex:1;">
-        Use page
-      </button>
-    </div>
+            <button
+              id="applyCropBtn"
+              class="primary-btn"
+              style="flex:1;"
+            >
+              Apply crop
+            </button>
+          </div>
+        `
+        : `
+          <div style="display:flex;gap:9px;">
+            <button
+              id="retakeBtn"
+              class="secondary-btn"
+              style="flex:1;"
+            >
+              Retake
+            </button>
+
+            <button
+              id="savePageBtn"
+              class="primary-btn"
+              style="flex:1;"
+            >
+              Use page
+            </button>
+          </div>
+        `
+    }
   `;
+
+  if (app.cropMode) {
+    renderCropOverlay();
+
+    document
+      .getElementById("cropOverlay")
+      ?.addEventListener("pointerdown", onCropPointerDown);
+  }
 
   document
     .getElementById("rotateBtn")
@@ -1346,14 +1673,20 @@ function renderPageEditor() {
 
   document
     .getElementById("cropBtn")
-    ?.addEventListener("click", () => {
-      showToast("Crop engine will be added in the image-processing stage.");
-    });
+    ?.addEventListener("click", toggleCropMode);
+
+  document
+    .getElementById("cancelCropBtn")
+    ?.addEventListener("click", cancelCrop);
+
+  document
+    .getElementById("applyCropBtn")
+    ?.addEventListener("click", applyCrop);
 
   document
     .getElementById("perspectiveBtn")
     ?.addEventListener("click", () => {
-      showToast("Perspective correction comes with the real scanner engine.");
+      showToast("Perspective correction is not available in this version.");
     });
 
   document
@@ -1418,21 +1751,31 @@ function applyFilter(filter) {
 }
 
 function resetEditorImage() {
-  const image = document.getElementById("editorImage");
+  app.cropMode = false;
+  app.cropDraft = null;
 
-  if (!image) {
-    return;
+  if (app.editingPageId && app.activeDocumentId) {
+    const doc = getDocument(app.activeDocumentId);
+    const page = getPage(doc, app.editingPageId);
+
+    if (page) {
+      page.rotation = 0;
+      page.filter = "original";
+      page.crop = null;
+
+      // Reset restores the unprocessed capture.
+      page.processedImagePath = app.pendingImage;
+      page.thumbnailPath = app.pendingImage;
+
+      doc.updatedAt = now();
+      saveState();
+    }
   }
 
-  image.dataset.rotation = "0";
-  image.dataset.filter = "original";
+  app.pendingCrop = null;
+  app.pendingFilter = "original";
 
-  image.style.transform = "";
-  image.style.filter = "";
-
-  document.querySelectorAll(".filter-btn").forEach(item => {
-    item.classList.toggle("active", item.dataset.filter === "original");
-  });
+  renderPageEditor();
 
   showToast("Edits reset.");
 }
@@ -1455,9 +1798,27 @@ async function usePage() {
 
   const filter = filterStyle(selectedFilter);
 
+  const crop = getCropState();
+
   const source = new Image();
 
   source.onload = () => {
+    /*
+     * Crop comes first and is expressed as a fraction of the pristine
+     * original, so it is applied before rotation and never compounds
+     * with a previous encode.
+     */
+    const sourceX = crop ? crop.x * source.naturalWidth : 0;
+    const sourceY = crop ? crop.y * source.naturalHeight : 0;
+
+    const sourceWidth = crop
+      ? crop.w * source.naturalWidth
+      : source.naturalWidth;
+
+    const sourceHeight = crop
+      ? crop.h * source.naturalHeight
+      : source.naturalHeight;
+
     const radians = rotation * Math.PI / 180;
 
     const swapDimensions =
@@ -1465,13 +1826,13 @@ async function usePage() {
 
     const canvas = document.createElement("canvas");
 
-    canvas.width = swapDimensions
-      ? source.naturalHeight
-      : source.naturalWidth;
+    canvas.width = Math.max(1, Math.round(
+      swapDimensions ? sourceHeight : sourceWidth
+    ));
 
-    canvas.height = swapDimensions
-      ? source.naturalWidth
-      : source.naturalHeight;
+    canvas.height = Math.max(1, Math.round(
+      swapDimensions ? sourceWidth : sourceHeight
+    ));
 
     const ctx = canvas.getContext("2d");
 
@@ -1491,8 +1852,14 @@ async function usePage() {
 
     ctx.drawImage(
       source,
-      -source.naturalWidth / 2,
-      -source.naturalHeight / 2
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      -sourceWidth / 2,
+      -sourceHeight / 2,
+      sourceWidth,
+      sourceHeight
     );
 
     const processedImage =
@@ -1516,6 +1883,7 @@ async function usePage() {
         existingPage.thumbnailPath = processedImage;
         existingPage.rotation = rotation;
         existingPage.filter = selectedFilter;
+        existingPage.crop = crop;
 
         doc.updatedAt = now();
 
@@ -1555,7 +1923,9 @@ async function usePage() {
 
       rotation,
 
-      filter: selectedFilter
+      filter: selectedFilter,
+
+      crop
     };
 
     /*
@@ -1661,7 +2031,9 @@ function createDocumentFromScanner(options = {}) {
       page.rotation || 0,
 
     filter:
-      page.filter || "original"
+      page.filter || "original",
+
+    crop: page.crop || null
   }));
 
   const docId = createId();
@@ -1897,6 +2269,9 @@ function handlePageAction(documentId, pageId, action) {
       page.processedImagePath;
 
     app.editingPageId = page.id;
+
+    app.cropMode = false;
+    app.cropDraft = null;
 
     navigate("page-editor");
     return;
