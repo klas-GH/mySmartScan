@@ -24,6 +24,7 @@ const defaultState = {
 
 let state = loadState();
 
+/*
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -41,24 +42,51 @@ function loadState() {
     return structuredClone(defaultState);
   }
 }
+*/
 
+/*
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
+*/
+
 
 /* =========================================================
    APP STATE
    ========================================================= */
 
 const app = {
-  route: "home",
-  previousRoute: null,
+  // Current screen
+  currentScreen: "home",
+
+  // Currently opened SmartScan document
   activeDocumentId: null,
+
+  // Page currently being edited
   editingPageId: null,
-  searchQuery: "",
+
+  // Temporary image being edited
+  pendingImage: null,
+
+  // Scanner session
   scannerPages: [],
-  pendingImage: null
+
+  // Scanner state
+  scannerActive: false,
+
+  // Current folder
+  activeFolderId: null,
+
+  // Search
+  searchQuery: "",
+
+  // UI
+  modalOpen: false,
+
+  // Prevent accidental double actions
+  busy: false
 };
+
 
 /* =========================================================
    DOM
@@ -94,6 +122,15 @@ function formatDate(dateString) {
   });
 }
 
+function createId() {
+  return (
+    Date.now().toString(36) +
+    "-" +
+    Math.random().toString(36).slice(2, 10)
+  );
+}
+
+
 function escapeHtml(value = "") {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -103,27 +140,60 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
-function getDocument(id) {
-  return state.documents.find(document => document.id === id);
+function getDocument(documentId) {
+  if (!documentId) {
+    return null;
+  }
+
+  return state.documents.find(
+    doc => doc.id === documentId
+  ) || null;
 }
 
-function getFolder(id) {
-  return state.folders.find(folder => folder.id === id);
+
+function getFolder(folderId) {
+  if (!folderId) {
+    return null;
+  }
+
+  return state.folders.find(
+    folder => folder.id === folderId
+  ) || null;
 }
 
-function getPage(document, pageId) {
-  return document?.pages?.find(page => page.id === pageId);
+
+function normalizePageOrder(doc) {
+  if (!doc || !Array.isArray(doc.pages)) {
+    return;
+  }
+
+  doc.pages.forEach((page, index) => {
+    page.order = index;
+  });
 }
 
-function documentPageCount(document) {
-  return document?.pages?.length || 0;
+
+function getPage(doc, pageId) {
+  return doc?.pages?.find(
+    page => page.id === pageId
+  ) || null;
 }
 
-function documentThumbnail(document) {
-  return document?.pages?.[0]?.processedImagePath ||
-         document?.pages?.[0]?.originalImagePath ||
-         "";
+
+function documentPageCount(doc) {
+  return doc?.pages?.length || 0;
 }
+
+
+function documentThumbnail(doc) {
+  return (
+    doc?.pages?.[0]?.processedImagePath ||
+    doc?.pages?.[0]?.originalImagePath ||
+    ""
+  );
+}
+
+
 
 function showToast(message) {
   const existing = document.querySelector(".toast");
@@ -142,6 +212,207 @@ function showToast(message) {
     toast.remove();
   }, 2200);
 }
+
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+
+    if (!raw) {
+      return {
+        documents: [],
+        folders: [],
+        settings: {
+          theme: "system",
+          defaultFilter: "original",
+          autoCapture: false,
+          defaultExportFormat: "pdf"
+        }
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+
+    return {
+      documents: Array.isArray(parsed.documents)
+        ? parsed.documents
+        : [],
+
+      folders: Array.isArray(parsed.folders)
+        ? parsed.folders
+        : [],
+
+      settings: {
+        theme: parsed.settings?.theme || "system",
+        defaultFilter:
+          parsed.settings?.defaultFilter || "original",
+        autoCapture:
+          parsed.settings?.autoCapture ?? false,
+        defaultExportFormat:
+          parsed.settings?.defaultExportFormat || "pdf"
+      }
+    };
+
+  } catch (error) {
+    console.error("Failed to load SmartScan state:", error);
+
+    return {
+      documents: [],
+      folders: [],
+      settings: {
+        theme: "system",
+        defaultFilter: "original",
+        autoCapture: false,
+        defaultExportFormat: "pdf"
+      }
+    };
+  }
+}
+
+
+function saveState() {
+  try {
+    const serialized = JSON.stringify(state);
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      serialized
+    );
+
+    return true;
+
+  } catch (error) {
+    console.error("Failed to save SmartScan state:", error);
+
+    if (error.name === "QuotaExceededError") {
+      showToast(
+        "Storage is full. Delete an old document and try again."
+      );
+    } else {
+      showToast(
+        "Could not save your changes."
+      );
+    }
+
+    return false;
+  }
+}
+
+function startScanner() {
+  app.scannerPages = [];
+  app.pendingImage = null;
+  app.editingPageId = null;
+
+  app.activeDocumentId = null;
+  app.scannerActive = true;
+
+  navigate("scanner");
+}
+
+
+function startScannerForDocument(documentId) {
+  app.scannerPages = [];
+  app.pendingImage = null;
+  app.editingPageId = null;
+
+  app.activeDocumentId = documentId;
+  app.scannerActive = true;
+
+  navigate("scanner");
+}
+
+
+
+function startNewScannerSession() {
+  app.scannerPages = [];
+  app.pendingImage = null;
+  app.editingPageId = null;
+  app.scannerActive = true;
+
+  navigate("scanner");
+}
+
+
+function addScannerPage(imageData) {
+  if (!imageData) {
+    showToast("No image captured.");
+    return;
+  }
+
+  app.scannerPages.push({
+    id: createId(),
+
+    order: app.scannerPages.length,
+
+    originalImagePath: imageData,
+
+    processedImagePath: imageData,
+
+    filter: "original",
+
+    rotation: 0
+  });
+}
+
+
+function getScannerPageCount() {
+  return app.scannerPages.length;
+}
+
+
+function clearScannerSession() {
+  app.scannerPages = [];
+  app.pendingImage = null;
+  app.editingPageId = null;
+  app.scannerActive = false;
+}
+
+function acceptCapturedPage(imageData) {
+  if (!imageData) {
+    showToast("No page to accept.");
+    return;
+  }
+
+  addScannerPage(imageData);
+
+  app.pendingImage = null;
+
+  renderScanner();
+
+  showToast(
+    `Page ${app.scannerPages.length} added`
+  );
+}
+
+
+function retakeCapturedPage() {
+  app.pendingImage = null;
+
+  renderScanner();
+
+  showToast("Ready to capture again.");
+}
+
+
+function addAnotherPage() {
+  app.pendingImage = null;
+
+  navigate("scanner");
+
+  showToast("Capture the next page.");
+}
+
+/*
+function finishScanning() {
+  if (app.scannerPages.length === 0) {
+    showToast("Capture at least one page first.");
+    return;
+  }
+
+  createDocumentFromScanner();
+}
+*/
+
 
 /* =========================================================
    ROUTING
@@ -163,6 +434,11 @@ function goBack() {
     return;
   }
 
+  if (app.route === "scan-session") {
+    navigate("document-editor");
+    return;
+  }
+
   if (app.route === "page-editor") {
     navigate("document-editor");
     return;
@@ -180,6 +456,7 @@ function goBack() {
 
   navigate("home");
 }
+
 
 /* =========================================================
    RENDERING
@@ -222,6 +499,11 @@ function render() {
     case "settings":
       renderSettings();
       break;
+
+    case "scan-session":
+  	renderScanSession();
+  	break;
+
 
     default:
       navigate("home");
@@ -270,12 +552,14 @@ function updateHeader() {
 
 function updateScanButton() {
   const hiddenRoutes = [
-    "scanner",
-    "page-editor",
-    "document-editor",
-    "settings",
-    "folder"
-  ];
+  "scanner",
+  "scan-session",
+  "page-editor",
+  "document-editor",
+  "settings",
+  "folder"
+];
+
 
   scanFab.classList.toggle("hidden", hiddenRoutes.includes(app.route));
 }
@@ -496,6 +780,25 @@ function openDocument(id) {
   navigate("document-editor");
 }
 
+function getCurrentPageFilter() {
+  if (!app.editingPageId || !app.activeDocumentId) {
+    return "original";
+  }
+
+  const doc = getDocument(app.activeDocumentId);
+
+  if (!doc) {
+    return "original";
+  }
+
+  const page = getPage(
+    doc,
+    app.editingPageId
+  );
+
+  return page?.filter || "original";
+}
+
 /* =========================================================
    FOLDERS
    ========================================================= */
@@ -610,11 +913,7 @@ function renderFolder() {
    SCANNER
    ========================================================= */
 
-function startScanner() {
-  app.scannerPages = [];
 
-  navigate("scanner");
-}
 
 function renderScanner() {
   main.innerHTML = `
@@ -691,6 +990,153 @@ function renderScanner() {
       showToast("Flash control will use the native camera in the next stage.");
     });
 }
+
+
+function renderScanSession() {
+  const doc = getDocument(app.activeDocumentId);
+
+  if (!doc) {
+    navigate("home");
+    return;
+  }
+
+  const pageCount = doc.pages.length;
+
+  const thumbnail =
+    doc.pages?.[pageCount - 1]?.processedImagePath ||
+    doc.pages?.[pageCount - 1]?.originalImagePath ||
+    "";
+
+  main.innerHTML = `
+    <section class="scan-session">
+
+      <div class="page-heading">
+        <h1>Page added</h1>
+        <p>
+          ${pageCount} page${pageCount === 1 ? "" : "s"}
+          in this document.
+        </p>
+      </div>
+
+      ${
+        thumbnail
+          ? `
+            <div class="editor-preview">
+              <img
+                src="${thumbnail}"
+                alt="Last scanned page"
+              />
+            </div>
+          `
+          : ""
+      }
+
+      <div class="section" style="margin-top:20px;">
+        <div class="empty-state">
+
+          <div class="empty-icon">✓</div>
+
+          <h2>
+            ${pageCount === 1
+              ? "Your first page is ready."
+              : "Another page is ready."}
+          </h2>
+
+          <p>
+            Add another page or finish this document.
+          </p>
+
+          <div
+            style="
+              display:flex;
+              flex-direction:column;
+              gap:10px;
+              margin-top:18px;
+            "
+          >
+
+            <button
+              id="addAnotherPageBtn"
+              class="primary-btn"
+              style="width:100%;"
+            >
+              ＋ Add another page
+            </button>
+
+            <button
+              id="doneScanningBtn"
+              class="secondary-btn"
+              style="width:100%;"
+            >
+              ✓ Done
+            </button>
+
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+  `;
+
+  document
+  .getElementById("addAnotherPageBtn")
+  ?.addEventListener("click", () => {
+    if (!app.activeDocumentId) {
+      showToast("Document session not found.");
+      return;
+    }
+
+    // IMPORTANT:
+    // Keep the current document active while scanning another page.
+    startScannerForDocument(app.activeDocumentId);
+  });
+
+
+ document
+  .getElementById("doneScanningBtn")
+  ?.addEventListener("click", () => {
+    finishScanSession();
+  });
+
+
+}
+
+function finishScanSession() {
+  const doc = getDocument(app.activeDocumentId);
+
+  if (!doc) {
+    showToast("Document not found.");
+    navigate("home");
+    return;
+  }
+
+  if (!doc.pages || doc.pages.length === 0) {
+    showToast("Add at least one page first.");
+    return;
+  }
+
+  // Scanner session is finished.
+  app.scannerActive = false;
+  app.scannerPages = [];
+  app.pendingImage = null;
+  app.editingPageId = null;
+
+  doc.updatedAt = now();
+
+  saveState();
+
+  // Explicitly leave the scan-session screen.
+  navigate("document-editor");
+
+  // Confirm completion after navigation.
+  setTimeout(() => {
+    showToast(
+      `Scan complete — ${doc.pages.length} page${doc.pages.length === 1 ? "" : "s"}`
+    );
+  }, 50);
+}
+
 
 function chooseImage() {
   /*
@@ -855,10 +1301,30 @@ function renderPageEditor() {
       </div>
 
       <div class="filter-row">
-        ${filterButton("original", "Original")}
-        ${filterButton("grayscale", "Grayscale")}
-        ${filterButton("bw", "B&W")}
-        ${filterButton("enhance", "Enhance")}
+        ${filterButton(
+  "original",
+  "Original",
+  getCurrentPageFilter() === "original"
+)}
+
+${filterButton(
+  "grayscale",
+  "Grayscale",
+  getCurrentPageFilter() === "grayscale"
+)}
+
+${filterButton(
+  "bw",
+  "B&W",
+  getCurrentPageFilter() === "bw"
+)}
+
+${filterButton(
+  "enhance",
+  "Enhance",
+  getCurrentPageFilter() === "enhance"
+)}
+
       </div>
     </div>
 
@@ -921,16 +1387,17 @@ function renderPageEditor() {
   });
 }
 
-function filterButton(id, label) {
+function filterButton(id, label, active = false) {
   return `
     <button
-      class="filter-btn ${id === "original" ? "active" : ""}"
+      class="filter-btn ${active ? "active" : ""}"
       data-filter="${id}"
     >
       ${label}
     </button>
   `;
 }
+
 
 function rotateEditorImage() {
   const image = document.getElementById("editorImage");
@@ -947,6 +1414,10 @@ function rotateEditorImage() {
 function applyFilter(filter) {
   const image = document.getElementById("editorImage");
 
+  if (!image) {
+    return;
+  }
+
   const filters = {
     original: "none",
     grayscale: "grayscale(1)",
@@ -954,73 +1425,283 @@ function applyFilter(filter) {
     enhance: "contrast(1.15) brightness(1.04) saturate(.8)"
   };
 
-  image.style.filter = filters[filter] || "none";
+  image.dataset.filter = filter;
+
+  image.style.filter =
+    filters[filter] || "none";
 }
 
-function usePage() {
+//usePage
+async function usePage() {
   const image = document.getElementById("editorImage");
 
-  const page = {
-    id: uid("page"),
-    order: 0,
-    originalImagePath: app.pendingImage,
-    processedImagePath: app.pendingImage,
-    thumbnailPath: app.pendingImage,
-    rotation: Number(image?.dataset.rotation || 0),
-    filter: "original"
-  };
-
-  app.scannerPages.push(page);
-  app.pendingImage = null;
-
-  showToast("Page added.");
-
-  /*
-    If this is the first page, create a new document.
-    If we're adding from an existing document, append to it.
-  */
-
-  if (app.activeDocumentId) {
-    const document = getDocument(app.activeDocumentId);
-
-    if (document) {
-      page.order = document.pages.length;
-      document.pages.push(page);
-      document.updatedAt = now();
-
-      saveState();
-      navigate("document-editor");
-      return;
-    }
+  if (!image || !app.pendingImage) {
+    showToast("No page to save.");
+    return;
   }
 
-  createDocumentFromScanner();
+  const rotation = Number(
+    image.dataset.rotation || 0
+  );
+
+  const selectedFilter =
+    image.dataset.filter || "original";
+
+  const filterStyles = {
+    original: "none",
+    grayscale: "grayscale(1)",
+    bw: "grayscale(1) contrast(2)",
+    enhance: "contrast(1.15) brightness(1.04) saturate(.8)"
+  };
+
+  const filter =
+    filterStyles[selectedFilter] || "none";
+
+  const source = new Image();
+
+  source.onload = () => {
+    const radians = rotation * Math.PI / 180;
+
+    const swapDimensions =
+      rotation % 180 !== 0;
+
+    const canvas = document.createElement("canvas");
+
+    canvas.width = swapDimensions
+      ? source.naturalHeight
+      : source.naturalWidth;
+
+    canvas.height = swapDimensions
+      ? source.naturalWidth
+      : source.naturalHeight;
+
+    const ctx = canvas.getContext("2d");
+
+    if (!ctx) {
+      showToast("Could not process the page.");
+      return;
+    }
+
+    ctx.filter = filter;
+
+    ctx.translate(
+      canvas.width / 2,
+      canvas.height / 2
+    );
+
+    ctx.rotate(radians);
+
+    ctx.drawImage(
+      source,
+      -source.naturalWidth / 2,
+      -source.naturalHeight / 2
+    );
+
+    const processedImage =
+      canvas.toDataURL("image/jpeg", 0.78);
+
+    /*
+     * =====================================================
+     * EDITING AN EXISTING PAGE
+     * =====================================================
+     */
+
+    if (app.editingPageId && app.activeDocumentId) {
+      const doc = getDocument(app.activeDocumentId);
+      const existingPage = getPage(
+        doc,
+        app.editingPageId
+      );
+
+      if (doc && existingPage) {
+        existingPage.processedImagePath = processedImage;
+        existingPage.thumbnailPath = processedImage;
+        existingPage.rotation = rotation;
+        existingPage.filter = selectedFilter;
+
+        doc.updatedAt = now();
+
+        saveState();
+
+        app.pendingImage = null;
+        app.editingPageId = null;
+
+        navigate("document-editor");
+
+        showToast("Page updated.");
+        return;
+      }
+    }
+
+    /*
+     * =====================================================
+     * CREATE NEW PAGE
+     * =====================================================
+     */
+
+    const page = {
+      id: uid("page"),
+
+      documentId: app.activeDocumentId || null,
+
+      order: 0,
+
+      originalImagePath:
+        app.pendingImage,
+
+      processedImagePath:
+        processedImage,
+
+      thumbnailPath:
+        processedImage,
+
+      rotation,
+
+      filter: selectedFilter
+    };
+
+    /*
+     * =====================================================
+     * ADD TO EXISTING DOCUMENT
+     * =====================================================
+     */
+
+    if (app.activeDocumentId) {
+      const doc = getDocument(app.activeDocumentId);
+
+      if (!doc) {
+        showToast("Document not found.");
+        return;
+      }
+
+      page.documentId = doc.id;
+      page.order = doc.pages.length;
+
+      doc.pages.push(page);
+
+      normalizePageOrder(doc);
+
+      doc.updatedAt = now();
+
+      saveState();
+
+      app.pendingImage = null;
+      app.editingPageId = null;
+
+      /*
+       * Stay in the scanner session.
+       * This is what allows:
+       *
+       * 1 page → Add another → 2 pages
+       * 2 pages → Add another → 3 pages
+       */
+      navigate("scan-session");
+
+      showToast(
+        `Page ${doc.pages.length} added.`
+      );
+
+      return;
+    }
+
+    /*
+     * =====================================================
+     * FIRST PAGE OF NEW DOCUMENT
+     * =====================================================
+     */
+
+    app.scannerPages.push(page);
+
+    app.pendingImage = null;
+    app.editingPageId = null;
+
+    createDocumentFromScanner({
+      session: true
+    });
+  };
+
+  source.onerror = () => {
+    showToast("Could not process the page.");
+  };
+
+  source.src = app.pendingImage;
 }
+
+
 
 /* =========================================================
    DOCUMENT CREATION
    ========================================================= */
 
-function createDocumentFromScanner() {
+function createDocumentFromScanner(options = {}) {
+  if (!app.scannerPages.length) {
+    showToast("No scanned pages.");
+    return;
+  }
+
   const timestamp = now();
 
-  const document = {
-    id: uid("doc"),
-    name: `Scan ${formatDate(timestamp)}`,
+  const pages = app.scannerPages.map((page, index) => ({
+    id: page.id || createId(),
+
+    documentId: null,
+
+    order: index,
+
+    originalImagePath:
+      page.originalImagePath,
+
+    processedImagePath:
+      page.processedImagePath ||
+      page.originalImagePath,
+
+    thumbnailPath:
+      page.processedImagePath ||
+      page.originalImagePath,
+
+    rotation:
+      page.rotation || 0,
+
+    filter:
+      page.filter || "original"
+  }));
+
+  const docId = createId();
+
+  const doc = {
+    id: docId,
+
+    name:
+      `Scan ${new Date().toLocaleDateString()}`,
+
     folderId: null,
+
     createdAt: timestamp,
+
     updatedAt: timestamp,
-    pages: [...app.scannerPages]
+
+    pages
   };
 
-  state.documents.unshift(document);
+  pages.forEach(page => {
+    page.documentId = docId;
+  });
+
+  state.documents.unshift(doc);
+
   saveState();
 
-  app.activeDocumentId = document.id;
-  app.scannerPages = [];
+  app.activeDocumentId = docId;
 
-  navigate("document-editor");
+  clearScannerSession();
+
+  if (options.session) {
+    navigate("scan-session");
+  } else {
+    navigate("document-editor");
+  }
 }
+
 
 /* =========================================================
    DOCUMENT EDITOR
@@ -1083,11 +1764,11 @@ function renderDocumentEditor() {
     });
 
   document
-    .getElementById("addPageBtn")
-    ?.addEventListener("click", () => {
-      app.pendingImage = null;
-      startScanner();
-    });
+  	.getElementById("addPageBtn")
+ 	 ?.addEventListener("click", () => {
+    	startScannerForDocument(doc.id);
+   });
+
 
   document
     .getElementById("saveDocumentBtn")
@@ -1097,7 +1778,7 @@ function renderDocumentEditor() {
       showToast("Document saved.");
     });
 
-  attachPageEvents(document);
+  attachPageEvents(doc);
 }
 
 function pageCard(document, page, index) {
@@ -1156,18 +1837,21 @@ function pageCard(document, page, index) {
   `;
 }
 
-function attachPageEvents(document) {
-  document
+function attachPageEvents(doc) {
+  window.document
     .querySelectorAll("[data-page-action]")
     .forEach(button => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", event => {
+        event.stopPropagation();
+
         const action = button.dataset.pageAction;
         const pageId = button.dataset.pageId;
 
-        handlePageAction(document.id, pageId, action);
+        handlePageAction(doc.id, pageId, action);
       });
     });
 }
+
 
 function handlePageAction(documentId, pageId, action) {
   const doc = getDocument(documentId);
@@ -1270,12 +1954,13 @@ function handlePageAction(documentId, pageId, action) {
   }
 }
 
-
+/*
 function normalizePageOrder(document) {
   document.pages.forEach((page, index) => {
     page.order = index;
   });
 }
+*/
 
 /* =========================================================
    DOCUMENT MENU
