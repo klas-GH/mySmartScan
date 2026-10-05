@@ -787,24 +787,6 @@ function openDocument(id) {
   navigate("document-editor");
 }
 
-function getCurrentPageFilter() {
-  if (!app.editingPageId || !app.activeDocumentId) {
-    return "original";
-  }
-
-  const doc = getDocument(app.activeDocumentId);
-
-  if (!doc) {
-    return "original";
-  }
-
-  const page = getPage(
-    doc,
-    app.editingPageId
-  );
-
-  return page?.filter || "original";
-}
 
 /* =========================================================
    FOLDERS
@@ -1264,11 +1246,53 @@ function fileToDataUrl(file) {
    PAGE EDITOR
    ========================================================= */
 
+const FILTER_STYLES = {
+  original: "none",
+  grayscale: "grayscale(1)",
+  bw: "grayscale(1) contrast(2)",
+  enhance: "contrast(1.15) brightness(1.04) saturate(.8)"
+};
+
+function filterStyle(filter) {
+  return FILTER_STYLES[filter] || "none";
+}
+
+/*
+ * Editing an existing page starts from its saved rotation and filter.
+ * A new page starts from the configured default filter.
+ *
+ * The source image itself is chosen by whoever opened the editor
+ * (app.pendingImage): a new capture, or a page's untouched
+ * originalImagePath when re-editing.
+ */
+function getEditState() {
+  if (app.editingPageId && app.activeDocumentId) {
+    const page = getPage(
+      getDocument(app.activeDocumentId),
+      app.editingPageId
+    );
+
+    if (page) {
+      return {
+        rotation: page.rotation || 0,
+        filter: page.filter || "original"
+      };
+    }
+  }
+
+  return {
+    rotation: 0,
+    filter: state.settings.defaultFilter || "original"
+  };
+}
+
 function renderPageEditor() {
   if (!app.pendingImage) {
     navigate("scanner");
     return;
   }
+
+  const edit = getEditState();
 
   main.innerHTML = `
     <div class="page-heading">
@@ -1277,7 +1301,17 @@ function renderPageEditor() {
     </div>
 
     <div class="editor-preview">
-      <img id="editorImage" src="${app.pendingImage}" alt="Scanned page" />
+      <img
+        id="editorImage"
+        src="${app.pendingImage}"
+        alt="Scanned page"
+        data-rotation="${edit.rotation}"
+        data-filter="${edit.filter}"
+        style="
+          transform: rotate(${edit.rotation}deg);
+          filter: ${filterStyle(edit.filter)};
+        "
+      />
     </div>
 
     <div class="editor-tools">
@@ -1308,30 +1342,10 @@ function renderPageEditor() {
       </div>
 
       <div class="filter-row">
-        ${filterButton(
-  "original",
-  "Original",
-  getCurrentPageFilter() === "original"
-)}
-
-${filterButton(
-  "grayscale",
-  "Grayscale",
-  getCurrentPageFilter() === "grayscale"
-)}
-
-${filterButton(
-  "bw",
-  "B&W",
-  getCurrentPageFilter() === "bw"
-)}
-
-${filterButton(
-  "enhance",
-  "Enhance",
-  getCurrentPageFilter() === "enhance"
-)}
-
+        ${filterButton("original", "Original", edit.filter === "original")}
+        ${filterButton("grayscale", "Grayscale", edit.filter === "grayscale")}
+        ${filterButton("bw", "B&W", edit.filter === "bw")}
+        ${filterButton("enhance", "Enhance", edit.filter === "enhance")}
       </div>
     </div>
 
@@ -1364,14 +1378,7 @@ ${filterButton(
 
   document
     .getElementById("resetBtn")
-    ?.addEventListener("click", () => {
-      const image = document.getElementById("editorImage");
-
-      image.style.filter = "";
-      image.style.transform = "";
-
-      showToast("Edits reset.");
-    });
+    ?.addEventListener("click", resetEditorImage);
 
   document
     .getElementById("retakeBtn")
@@ -1425,17 +1432,29 @@ function applyFilter(filter) {
     return;
   }
 
-  const filters = {
-    original: "none",
-    grayscale: "grayscale(1)",
-    bw: "grayscale(1) contrast(2)",
-    enhance: "contrast(1.15) brightness(1.04) saturate(.8)"
-  };
-
   image.dataset.filter = filter;
 
-  image.style.filter =
-    filters[filter] || "none";
+  image.style.filter = filterStyle(filter);
+}
+
+function resetEditorImage() {
+  const image = document.getElementById("editorImage");
+
+  if (!image) {
+    return;
+  }
+
+  image.dataset.rotation = "0";
+  image.dataset.filter = "original";
+
+  image.style.transform = "";
+  image.style.filter = "";
+
+  document.querySelectorAll(".filter-btn").forEach(item => {
+    item.classList.toggle("active", item.dataset.filter === "original");
+  });
+
+  showToast("Edits reset.");
 }
 
 //usePage
@@ -1454,15 +1473,7 @@ async function usePage() {
   const selectedFilter =
     image.dataset.filter || "original";
 
-  const filterStyles = {
-    original: "none",
-    grayscale: "grayscale(1)",
-    bw: "grayscale(1) contrast(2)",
-    enhance: "contrast(1.15) brightness(1.04) saturate(.8)"
-  };
-
-  const filter =
-    filterStyles[selectedFilter] || "none";
+  const filter = filterStyle(selectedFilter);
 
   const source = new Image();
 
@@ -1896,9 +1907,14 @@ function handlePageAction(documentId, pageId, action) {
   if (action === "edit") {
     const page = doc.pages[index];
 
+    /*
+     * Re-edit from the untouched original, never from the already
+     * processed JPEG, so repeated edits do not stack up encoding
+     * loss. getEditState() restores the saved rotation and filter.
+     */
     app.pendingImage =
-      page.processedImagePath ||
-      page.originalImagePath;
+      page.originalImagePath ||
+      page.processedImagePath;
 
     app.editingPageId = page.id;
 
