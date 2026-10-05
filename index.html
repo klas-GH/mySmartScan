@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f8fc" />
+  <title>SmartScan</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <button id="backBtn" class="icon-btn hidden" aria-label="Back">
+        ←
+      </button>
+
+      <div class="brand">
+        <span class="brand-mark">S</span>
+        <div>
+          <div class="brand-name">SmartScan</div>
+          <div id="screenSubtitle" class="brand-subtitle">
+            Your documents, simplified.
+          </div>
+        </div>
+      </div>
+
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+        ⚙
+      </button>
+    </header>
+
+    <!-- App content -->
+    <main id="main"></main>
+
+    <!-- Primary scan action -->
+    <button id="scanFab" class="scan-fab">
+      <span class="scan-icon">＋</span>
+      <span>Scan document</span>
+    </button>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-route="home">
+        <span>⌂</span>
+        <small>Home</small>
+      </button>
+
+      <button class="nav-item" data-route="documents">
+        <span>▣</span>
+        <small>Documents</small>
+      </button>
+
+      <button class="nav-item" data-route="folders">
+        <span>□</span>
+        <small>Folders</small>
+      </button>
+
+      <button class="nav-item" data-route="settings">
+        <span>⚙</span>
+        <small>Settings</small>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- Hidden image picker.
+       In V0 this replaces the real native scanner. -->
+  <input
+    id="imageInput"
+    type="file"
+    accept="image/*"
+    capture="environment"
+    hidden
+  />
+
+  <!-- Modal container -->
+  <div id="modalRoot"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
