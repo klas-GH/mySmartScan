@@ -243,6 +243,309 @@ function wait(ms) {
 }
 
 
+/* =========================================================
+   OCR — Tesseract.js integration
+   ========================================================= */
+
+let tesseractWorker = null;
+
+/*
+ * Load Tesseract.js from CDN and create a worker.
+ * Uses the browser/CDN approach to keep zero build dependencies.
+ */
+async function loadTesseract() {
+  if (tesseractWorker) {
+    return tesseractWorker;
+  }
+
+  try {
+    // Load Tesseract.js from CDN
+    const Tesseract = await import(
+      "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.esm.min.mjs"
+    );
+
+    tesseractWorker = await Tesseract.createWorker("eng", 1, {
+      logger: m => {
+        if (m.status === "recognizing text") {
+          showToast(`Recognizing text… ${Math.round(m.progress * 100)}%`);
+        }
+      }
+    });
+
+    return tesseractWorker;
+  } catch (error) {
+    console.error("Failed to load Tesseract.js:", error);
+    throw new Error("OCR engine failed to load.");
+  }
+}
+
+/*
+ * Render the current page appearance (original + crop + filter + rotation)
+ * to a canvas and return a data URL for OCR processing.
+ * Reuses the existing editing pipeline logic.
+ */
+async function renderPageForOcr(page) {
+  const original = page.originalImagePath || page.processedImagePath;
+
+  if (!original) {
+    throw new Error("No image available for OCR.");
+  }
+
+  const image = new Image();
+
+  return new Promise((resolve, reject) => {
+    image.onload = () => {
+      try {
+        const crop = page.crop;
+        const rotation = page.rotation || 0;
+        const filter = page.filter || "original";
+
+        const sourceX = crop ? crop.x * image.naturalWidth : 0;
+        const sourceY = crop ? crop.y * image.naturalHeight : 0;
+        const sourceWidth = crop ? crop.w * image.naturalWidth : image.naturalWidth;
+        const sourceHeight = crop ? crop.h * image.naturalHeight : image.naturalHeight;
+
+        const radians = rotation * Math.PI / 180;
+        const swapDimensions = rotation % 180 !== 0;
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          throw new Error("Could not create canvas for OCR.");
+        }
+
+        canvas.width = Math.max(1, Math.round(
+          swapDimensions ? sourceHeight : sourceWidth
+        ));
+        canvas.height = Math.max(1, Math.round(
+          swapDimensions ? sourceWidth : sourceHeight
+        ));
+
+        ctx.filter = filterStyle(filter);
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(radians);
+        ctx.drawImage(
+          image,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          -sourceWidth / 2,
+          -sourceHeight / 2,
+          sourceWidth,
+          sourceHeight
+        );
+
+        resolve(canvas.toDataURL("image/png"));
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    image.onerror = () => reject(new Error("Image could not be loaded."));
+    image.src = original;
+  });
+}
+
+/*
+ * Recognize text from an image data URL using Tesseract.js.
+ * Returns the recognized plain text.
+ */
+async function recognizeText(imageDataUrl) {
+  const worker = await loadTesseract();
+
+  try {
+    const { data: { text } } = await worker.recognize(imageDataUrl);
+    return text.trim();
+  } catch (error) {
+    console.error("OCR recognition failed:", error);
+    throw new Error("Could not recognize text.");
+  }
+}
+
+/*
+ * Open the OCR modal for a page.
+ * Shows existing OCR text if available, otherwise runs OCR.
+ */
+async function openOcrModal(page) {
+  const doc = getDocument(app.activeDocumentId);
+  if (!doc || !page) {
+    showToast("Page not found.");
+    return;
+  }
+
+  // If OCR text already exists, show it immediately
+  if (page.ocrText) {
+    showOcrResultModal(page);
+    return;
+  }
+
+  // Show loading state
+  showOcrLoadingModal(page);
+
+  try {
+    // Generate current page appearance for OCR
+    const imageDataUrl = await renderPageForOcr(page);
+
+    // Run OCR
+    const text = await recognizeText(imageDataUrl);
+
+    if (!text) {
+      throw new Error("No text was detected on this page.");
+    }
+
+    // Save OCR text to page
+    page.ocrText = text;
+    doc.updatedAt = now();
+    saveState();
+
+    // Show result
+    showOcrResultModal(page);
+  } catch (error) {
+    showOcrErrorModal(page, error.message);
+  }
+}
+
+/*
+ * Show OCR loading modal.
+ */
+function showOcrLoadingModal(page) {
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="ocrModal">
+      <div class="modal">
+        <h2>OCR</h2>
+        <div style="text-align:center;padding:24px;">
+          <div style="font-size:18px;margin-bottom:12px;">Recognizing text…</div>
+          <div class="spinner" style="margin:0 auto;"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const modal = document.getElementById("ocrModal");
+  modal?.addEventListener("click", e => {
+    if (e.target === modal) closeOcrModal();
+  });
+}
+
+/*
+ * Show OCR result modal with recognized text and copy button.
+ */
+function showOcrResultModal(page) {
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="ocrModal">
+      <div class="modal">
+        <h2>Recognized Text</h2>
+        <textarea
+          id="ocrTextArea"
+          readonly
+          style="min-height:200px;"
+        >${escapeHtml(page.ocrText || "")}</textarea>
+        <div class="modal-actions">
+          <button id="ocrCopyBtn" class="primary-btn">Copy text</button>
+          <button id="ocrRerunBtn" class="secondary-btn">Run again</button>
+          <button id="ocrCloseBtn" class="secondary-btn">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const modal = document.getElementById("ocrModal");
+  modal?.addEventListener("click", e => {
+    if (e.target === modal) closeOcrModal();
+  });
+
+  document.getElementById("ocrCopyBtn")?.addEventListener("click", async () => {
+    await copyOcrText(page);
+  });
+
+  document.getElementById("ocrRerunBtn")?.addEventListener("click", async () => {
+    page.ocrText = null;
+    const doc = getDocument(app.activeDocumentId);
+    if (doc) {
+      doc.updatedAt = now();
+      saveState();
+    }
+    await openOcrModal(page);
+  });
+
+  document.getElementById("ocrCloseBtn")?.addEventListener("click", closeOcrModal);
+}
+
+/*
+ * Show OCR error modal with retry option.
+ */
+function showOcrErrorModal(page, message) {
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="ocrModal">
+      <div class="modal">
+        <h2>OCR Error</h2>
+        <p style="text-align:center;margin:16px 0;">${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          <button id="ocrRetryBtn" class="primary-btn">Try again</button>
+          <button id="ocrCloseErrorBtn" class="secondary-btn">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const modal = document.getElementById("ocrModal");
+  modal?.addEventListener("click", e => {
+    if (e.target === modal) closeOcrModal();
+  });
+
+  document.getElementById("ocrRetryBtn")?.addEventListener("click", async () => {
+    page.ocrText = null;
+    const doc = getDocument(app.activeDocumentId);
+    if (doc) {
+      doc.updatedAt = now();
+      saveState();
+    }
+    await openOcrModal(page);
+  });
+
+  document.getElementById("ocrCloseErrorBtn")?.addEventListener("click", closeOcrModal);
+}
+
+/*
+ * Copy OCR text to clipboard.
+ */
+async function copyOcrText(page) {
+  if (!page.ocrText) {
+    showToast("No text to copy.");
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(page.ocrText);
+      showToast("Text copied.");
+    } else {
+      // Fallback for older browsers
+      const textarea = document.getElementById("ocrTextArea");
+      if (textarea) {
+        textarea.select();
+        document.execCommand("copy");
+        showToast("Text copied.");
+      } else {
+        throw new Error("Clipboard not available.");
+      }
+    }
+  } catch (error) {
+    console.error("Copy failed:", error);
+    showToast("Failed to copy text.");
+  }
+}
+
+/*
+ * Close OCR modal.
+ */
+function closeOcrModal() {
+  modalRoot.innerHTML = "";
+}
+
+
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -1720,9 +2023,9 @@ function renderPageEditor() {
         <span>${!!crop ? "Crop ✓" : "Crop"}</span>
       </button>
 
-      <button class="tool-btn" id="perspectiveBtn">
-        <span>◇</span>
-        <span>Perspective</span>
+      <button class="tool-btn" id="ocrBtn">
+        <span>◰</span>
+        <span>OCR</span>
       </button>
 
       <button class="tool-btn" id="resetBtn">
@@ -1812,9 +2115,9 @@ function renderPageEditor() {
     ?.addEventListener("click", applyCrop);
 
   document
-    .getElementById("perspectiveBtn")
+    .getElementById("ocrBtn")
     ?.addEventListener("click", () => {
-      showToast("Perspective correction is not available in this version.");
+      openOcrModal();
     });
 
   document
@@ -2346,6 +2649,13 @@ function pageCard(document, page, index) {
           ×
         </button>
 
+        <button
+          data-page-action="ocr"
+          data-page-id="${page.id}"
+        >
+          OCR
+        </button>
+
       </div>
     </article>
   `;
@@ -2476,6 +2786,16 @@ function handlePageAction(documentId, pageId, action) {
 
     saveState();
     renderDocumentEditor();
+  }
+
+  // -----------------------------------------
+  // OCR page
+  // -----------------------------------------
+
+  if (action === "ocr") {
+    const page = doc.pages[index];
+    openOcrModal(page);
+    return;
   }
 }
 
