@@ -261,7 +261,7 @@ async function loadTesseract() {
   try {
     // Load Tesseract.js from CDN
     const Tesseract = await import(
-      "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.esm.min.mjs"
+      "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.esm.min.js"
     );
 
     tesseractWorker = await Tesseract.createWorker("eng", 1, {
