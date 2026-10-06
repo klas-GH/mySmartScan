@@ -1,3 +1,4 @@
+/// part 1
 /* =========================================================
    SmartScan V0
    ---------------------------------------------------------
@@ -605,7 +606,7 @@ function renderHome() {
         Your files stay on this device.
       </p>
       <button class="primary-btn" id="heroScanBtn">
-        Scan your first document
+        Scan your document
       </button>
     </section>
 
@@ -1995,7 +1996,7 @@ async function usePage() {
   source.src = app.pendingImage;
 }
 
-
+/////part2
 
 /* =========================================================
    DOCUMENT CREATION
@@ -2637,10 +2638,23 @@ const PDF_PAGE_WIDTH = 595;
 const PDF_PAGE_HEIGHT = 842;
 
 const EXPORT_FORMATS = [
-  { id: "pdf", label: "PDF", hint: "One file, all pages" },
-  { id: "jpg", label: "JPG", hint: "One file per page" },
-  { id: "png", label: "PNG", hint: "One file per page" }
+  {
+    id: "pdf",
+    label: "PDF",
+    hint: "One file, all pages"
+  },
+  {
+    id: "jpg",
+    label: "JPG",
+    hint: "JPG or ZIP for multiple pages"
+  },
+  {
+    id: "png",
+    label: "PNG",
+    hint: "PNG or ZIP for multiple pages"
+  }
 ];
+
 
 function getDefaultExportFormat() {
   return EXPORT_FORMATS.some(
@@ -3095,6 +3109,733 @@ function buildPdfBytes(images) {
   return concatBytes(chunks);
 }
 
+/* =========================================================
+   STORE-ONLY ZIP
+   ---------------------------------------------------------
+   Minimal ZIP writer for SmartScan image exports.
+
+   Features:
+   - ZIP method 0 (stored / no compression)
+   - UTF-8 filenames
+   - CRC-32
+   - Multiple files
+   - No external dependencies
+   - No ZIP64 for V1
+
+   Intended for JPG/PNG export only.
+   ========================================================= */
+
+const ZIP_VERSION_NEEDED = 20;
+const ZIP_GENERAL_PURPOSE_UTF8 = 0x0800;
+const ZIP_METHOD_STORE = 0;
+
+function writeUint16LE(value) {
+  const bytes = new Uint8Array(2);
+
+  bytes[0] = value & 0xff;
+  bytes[1] = (value >>> 8) & 0xff;
+
+  return bytes;
+}
+
+function writeUint32LE(value) {
+  const bytes = new Uint8Array(4);
+
+  bytes[0] = value & 0xff;
+  bytes[1] = (value >>> 8) & 0xff;
+  bytes[2] = (value >>> 16) & 0xff;
+  bytes[3] = (value >>> 24) & 0xff;
+
+  return bytes;
+}
+
+function concatByteArrays(chunks) {
+  let total = 0;
+
+  chunks.forEach(chunk => {
+    total += chunk.length;
+  });
+
+  const result = new Uint8Array(total);
+
+  let offset = 0;
+
+  chunks.forEach(chunk => {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  });
+
+  return result;
+}
+
+
+/* ---------------------------------------------------------
+   CRC-32
+   --------------------------------------------------------- */
+
+const ZIP_CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+
+  for (let index = 0; index < 256; index++) {
+    let value = index;
+
+    for (let bit = 0; bit < 8; bit++) {
+      value =
+        value & 1
+          ? 0xedb88320 ^ (value >>> 1)
+          : value >>> 1;
+    }
+
+    table[index] = value >>> 0;
+  }
+
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+
+  for (let index = 0; index < bytes.length; index++) {
+    crc =
+      ZIP_CRC32_TABLE[
+        (crc ^ bytes[index]) & 0xff
+      ] ^
+      (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+
+/* ---------------------------------------------------------
+   ZIP filename encoding
+   --------------------------------------------------------- */
+
+const ZIP_TEXT_ENCODER = new TextEncoder();
+
+function zipUtf8(text) {
+  return ZIP_TEXT_ENCODER.encode(String(text));
+}
+
+
+/* ---------------------------------------------------------
+   DOS date/time
+   --------------------------------------------------------- */
+
+function zipDosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+
+  const dosTime =
+    (date.getHours() << 11) |
+    (date.getMinutes() << 5) |
+    Math.floor(date.getSeconds() / 2);
+
+  const dosDate =
+    ((year - 1980) << 9) |
+    ((date.getMonth() + 1) << 5) |
+    date.getDate();
+
+  return {
+    time: dosTime,
+    date: dosDate
+  };
+}
+
+
+/* ---------------------------------------------------------
+   ZIP writer
+   --------------------------------------------------------- */
+
+function buildStoreOnlyZip(files) {
+  if (!Array.isArray(files) || !files.length) {
+    throw new Error("ZIP requires at least one file.");
+  }
+
+  const localParts = [];
+  const centralParts = [];
+
+  let localOffset = 0;
+
+  const nowDate = zipDosDateTime();
+
+  files.forEach(file => {
+    if (!file || !file.name || !file.data) {
+      throw new Error("Invalid ZIP file entry.");
+    }
+
+    const data =
+      file.data instanceof Uint8Array
+        ? file.data
+        : new Uint8Array(file.data);
+
+    const nameBytes = zipUtf8(file.name);
+
+    if (nameBytes.length > 0xffff) {
+      throw new Error("ZIP filename is too long.");
+    }
+
+    if (data.length > 0xffffffff) {
+      throw new Error("ZIP file is too large.");
+    }
+
+    const checksum = crc32(data);
+
+    /*
+     * Local file header
+     *
+     * Signature              4
+     * Version needed         2
+     * Flags                   2
+     * Compression             2
+     * Time                    2
+     * Date                    2
+     * CRC-32                  4
+     * Compressed size         4
+     * Uncompressed size       4
+     * Filename length         2
+     * Extra length            2
+     */
+
+    const localHeader = concatByteArrays([
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+
+      writeUint16LE(ZIP_VERSION_NEEDED),
+
+      writeUint16LE(
+        ZIP_GENERAL_PURPOSE_UTF8
+      ),
+
+      writeUint16LE(ZIP_METHOD_STORE),
+
+      writeUint16LE(nowDate.time),
+      writeUint16LE(nowDate.date),
+
+      writeUint32LE(checksum),
+
+      writeUint32LE(data.length),
+      writeUint32LE(data.length),
+
+      writeUint16LE(nameBytes.length),
+
+      writeUint16LE(0)
+    ]);
+
+    localParts.push(
+      localHeader,
+      nameBytes,
+      data
+    );
+
+    /*
+     * Central directory entry
+     *
+     * Signature              4
+     * Version made by       2
+     * Version needed         2
+     * Flags                  2
+     * Compression            2
+     * Time                   2
+     * Date                   2
+     * CRC-32                 4
+     * Compressed size        4
+     * Uncompressed size      4
+     * Filename length        2
+     * Extra length            2
+     * Comment length         2
+     * Disk number             2
+     * Internal attributes    2
+     * External attributes    4
+     * Local header offset    4
+     */
+
+    const centralHeader = concatByteArrays([
+      new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
+
+      // Version made by:
+      // 3 = Unix, 20 = ZIP version 2.0
+      writeUint16LE(0x0314),
+
+      writeUint16LE(ZIP_VERSION_NEEDED),
+
+      writeUint16LE(
+        ZIP_GENERAL_PURPOSE_UTF8
+      ),
+
+      writeUint16LE(ZIP_METHOD_STORE),
+
+      writeUint16LE(nowDate.time),
+      writeUint16LE(nowDate.date),
+
+      writeUint32LE(checksum),
+
+      writeUint32LE(data.length),
+      writeUint32LE(data.length),
+
+      writeUint16LE(nameBytes.length),
+
+      writeUint16LE(0), // extra length
+      writeUint16LE(0), // comment length
+
+      writeUint16LE(0), // disk number
+
+      writeUint16LE(0), // internal attributes
+
+      writeUint32LE(0), // external attributes
+
+      writeUint32LE(localOffset)
+    ]);
+
+    centralParts.push(
+      centralHeader,
+      nameBytes
+    );
+
+    localOffset +=
+      localHeader.length +
+      nameBytes.length +
+      data.length;
+  });
+
+  const centralDirectory = concatByteArrays(
+    centralParts
+  );
+
+  const localDirectory = concatByteArrays(
+    localParts
+  );
+
+  const centralDirectoryOffset =
+    localDirectory.length;
+
+  /*
+   * End of central directory
+   *
+   * Signature                  4
+   * Disk number                2
+   * Central directory disk     2
+   * Entries on disk            2
+   * Total entries              2
+   * Central directory size     4
+   * Central directory offset   4
+   * Comment length             2
+   */
+
+  const endOfCentralDirectory = concatByteArrays([
+    new Uint8Array([
+      0x50, 0x4b, 0x05, 0x06
+    ]),
+
+    writeUint16LE(0),
+    writeUint16LE(0),
+
+    writeUint16LE(files.length),
+    writeUint16LE(files.length),
+
+    writeUint32LE(
+      centralDirectory.length
+    ),
+
+    writeUint32LE(
+      centralDirectoryOffset
+    ),
+
+    writeUint16LE(0)
+  ]);
+
+  return concatByteArrays([
+    localDirectory,
+    centralDirectory,
+    endOfCentralDirectory
+  ]);
+}
+
+/* =========================================================
+   ZIP SELF-TEST
+   ---------------------------------------------------------
+   Development-only integrity test.
+
+   Verifies:
+   - ZIP can be parsed
+   - filenames survive UTF-8 encoding
+   - stored bytes are unchanged
+   - CRC-32 values are correct
+   - empty files work
+   ========================================================= */
+
+function bytesEqual(a, b) {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let index = 0; index < a.length; index++) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function assertZipSelfTest(condition, message) {
+  if (!condition) {
+    throw new Error(
+      `ZIP self-test failed: ${message}`
+    );
+  }
+}
+
+
+/*
+ * Read the local file entries from the exact ZIP format
+ * produced by buildStoreOnlyZip().
+ *
+ * This is intentionally NOT a general ZIP parser.
+ * It only understands our store-only ZIP format.
+ */
+function readStoreOnlyZipForTest(bytes) {
+  const view = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength
+  );
+
+  const decoder = new TextDecoder();
+
+  const entries = [];
+
+  let offset = 0;
+
+  while (offset + 4 <= bytes.length) {
+    const signature =
+      view.getUint32(offset, true);
+
+    /*
+     * Local file header
+     */
+    if (signature === 0x04034b50) {
+      const compression =
+        view.getUint16(
+          offset + 8,
+          true
+        );
+
+      const checksum =
+        view.getUint32(
+          offset + 14,
+          true
+        );
+
+      const compressedSize =
+        view.getUint32(
+          offset + 18,
+          true
+        );
+
+      const uncompressedSize =
+        view.getUint32(
+          offset + 22,
+          true
+        );
+
+      const fileNameLength =
+        view.getUint16(
+          offset + 26,
+          true
+        );
+
+      const extraLength =
+        view.getUint16(
+          offset + 28,
+          true
+        );
+
+      assertZipSelfTest(
+        compression === ZIP_METHOD_STORE,
+        "entry is not store-only"
+      );
+
+      assertZipSelfTest(
+        compressedSize === uncompressedSize,
+        "stored entry has different compressed/uncompressed sizes"
+      );
+
+      const nameStart =
+        offset + 30;
+
+      const nameEnd =
+        nameStart + fileNameLength;
+
+      const extraEnd =
+        nameEnd + extraLength;
+
+      const name =
+        decoder.decode(
+          bytes.slice(
+            nameStart,
+            nameEnd
+          )
+        );
+
+      const dataEnd =
+        extraEnd + compressedSize;
+
+      assertZipSelfTest(
+        dataEnd <= bytes.length,
+        `entry "${name}" extends beyond ZIP`
+      );
+
+      const data =
+        bytes.slice(
+          extraEnd,
+          dataEnd
+        );
+
+      entries.push({
+        name,
+        data,
+        checksum
+      });
+
+      offset = dataEnd;
+
+      continue;
+    }
+
+    /*
+     * Central directory.
+     *
+     * We only need the local entries for the
+     * byte-for-byte integrity test.
+     */
+    if (signature === 0x02014b50) {
+      break;
+    }
+
+    /*
+     * End of central directory.
+     */
+    if (signature === 0x06054b50) {
+      break;
+    }
+
+    throw new Error(
+      `Unexpected ZIP signature at offset ${offset}`
+    );
+  }
+
+  return entries;
+}
+
+
+function runZipSelfTest() {
+  console.group("SmartScan ZIP self-test");
+
+  try {
+    /*
+     * Deliberately use recognizable bytes rather than
+     * real images. The ZIP layer doesn't care whether
+     * the bytes came from JPG, PNG or anything else.
+     */
+
+    const testFiles = [
+      {
+        name: "page-1.jpg",
+
+        data: new Uint8Array([
+          0xff, 0xd8, 0xff, 0xe0,
+          0x00, 0x10, 0x4a, 0x46,
+          0x49, 0x46, 0x00, 0x01,
+          0x02, 0x03, 0x04,
+          0xff, 0xd9
+        ])
+      },
+
+      {
+        name: "page 2.png",
+
+        data: new Uint8Array([
+          0x89, 0x50, 0x4e, 0x47,
+          0x0d, 0x0a, 0x1a, 0x0a,
+          0x00, 0x00, 0x00, 0x0d,
+          0x49, 0x48, 0x44, 0x52
+        ])
+      },
+
+      {
+        name: "unicode-ășț.png",
+
+        data: new Uint8Array([
+          0x00,
+          0x01,
+          0x02,
+          0x7f,
+          0x80,
+          0xfe,
+          0xff
+        ])
+      },
+
+      {
+        name: "empty.jpg",
+
+        data: new Uint8Array([])
+      }
+    ];
+
+
+    /*
+     * Build ZIP.
+     */
+    const zipBytes =
+      buildStoreOnlyZip(
+        testFiles
+      );
+
+
+    assertZipSelfTest(
+      zipBytes instanceof Uint8Array,
+      "buildStoreOnlyZip() did not return Uint8Array"
+    );
+
+    assertZipSelfTest(
+      zipBytes.length > 0,
+      "ZIP is empty"
+    );
+
+
+    /*
+     * Read entries back.
+     */
+    const extracted =
+      readStoreOnlyZipForTest(
+        zipBytes
+      );
+
+
+    assertZipSelfTest(
+      extracted.length === testFiles.length,
+      `expected ${testFiles.length} entries, got ${extracted.length}`
+    );
+
+
+    /*
+     * Verify every entry.
+     */
+    testFiles.forEach(
+      (expected, index) => {
+        const actual =
+          extracted[index];
+
+        assertZipSelfTest(
+          actual.name === expected.name,
+          `filename mismatch at entry ${index + 1}`
+        );
+
+        assertZipSelfTest(
+          bytesEqual(
+            actual.data,
+            expected.data
+          ),
+          `byte mismatch in "${expected.name}"`
+        );
+
+
+        /*
+         * Verify CRC stored in the ZIP header.
+         */
+        const expectedCrc =
+          crc32(expected.data);
+
+        assertZipSelfTest(
+          actual.checksum === expectedCrc,
+          `CRC mismatch in "${expected.name}"`
+        );
+
+
+        /*
+         * Recalculate CRC from the extracted bytes.
+         *
+         * This gives us an additional integrity check.
+         */
+        const extractedCrc =
+          crc32(actual.data);
+
+        assertZipSelfTest(
+          extractedCrc === expectedCrc,
+          `extracted CRC mismatch in "${expected.name}"`
+        );
+
+
+        console.log(
+          `✓ ${expected.name} — ` +
+          `${expected.data.length} bytes — ` +
+          `CRC ${expectedCrc.toString(16).padStart(8, "0")}`
+        );
+      }
+    );
+
+
+    /*
+     * Verify the ZIP end-of-central-directory record
+     * exists somewhere in the archive.
+     */
+    let foundEndRecord = false;
+
+    for (
+      let index = 0;
+      index + 4 <= zipBytes.length;
+      index++
+    ) {
+      if (
+        zipBytes[index] === 0x50 &&
+        zipBytes[index + 1] === 0x4b &&
+        zipBytes[index + 2] === 0x05 &&
+        zipBytes[index + 3] === 0x06
+      ) {
+        foundEndRecord = true;
+        break;
+      }
+    }
+
+    assertZipSelfTest(
+      foundEndRecord,
+      "end-of-central-directory record not found"
+    );
+
+
+    console.log(
+      `✓ ${extracted.length} entries verified`
+    );
+
+    console.log(
+      "✓ ZIP byte-for-byte integrity verified"
+    );
+
+    console.log(
+      "✓ ZIP CRC-32 values verified"
+    );
+
+    console.log(
+      "✓ ZIP self-test passed"
+    );
+
+    return true;
+
+  } catch (error) {
+    console.error(
+      "✗ ZIP self-test failed:",
+      error
+    );
+
+    return false;
+
+  } finally {
+    console.groupEnd();
+  }
+}
+
+
+
 async function exportDocumentPdf(documentId, mode = "download") {
   const doc = getDocument(documentId);
 
@@ -3140,7 +3881,12 @@ async function exportDocumentPdf(documentId, mode = "download") {
   }
 }
 
-async function exportDocumentImages(documentId, extension, mode = "download") {
+
+async function exportDocumentImages(
+  documentId,
+  extension,
+  mode = "download"
+) {
   const doc = getDocument(documentId);
 
   if (!doc) {
@@ -3159,38 +3905,163 @@ async function exportDocumentImages(documentId, extension, mode = "download") {
     return;
   }
 
-  const type = extension === "png" ? "image/png" : "image/jpeg";
-  const quality = type === "image/jpeg" ? 0.92 : undefined;
+  const type =
+    extension === "png"
+      ? "image/png"
+      : "image/jpeg";
+
+  const quality =
+    type === "image/jpeg"
+      ? 0.92
+      : undefined;
 
   const many = sources.length > 1;
 
   try {
-    const exports = [];
+    /*
+     * -------------------------------------------------------
+     * Single page
+     *
+     * Keep the existing behaviour:
+     *
+     * document.jpg
+     * document.png
+     * -------------------------------------------------------
+     */
 
-    for (let index = 0; index < sources.length; index++) {
-      const canvas = await renderPageToCanvas(sources[index]);
+    if (!many) {
+      const canvas =
+        await renderPageToCanvas(sources[0]);
 
-      const blob = await canvasToBlob(canvas, type, quality);
+      const blob =
+        await canvasToBlob(
+          canvas,
+          type,
+          quality
+        );
 
-      const suffix = many ? `-${index + 1}` : "";
-
-      exports.push({
+      const exports = [{
         blob,
-        fileName: exportFileName(doc.name, extension, suffix)
+        fileName:
+          exportFileName(
+            doc.name,
+            extension
+          )
+      }];
+
+      await deliverExports(
+        exports,
+        mode,
+        extension.toUpperCase(),
+        1
+      );
+
+      return;
+    }
+
+
+    /*
+     * -------------------------------------------------------
+     * Multiple pages
+     *
+     * Create:
+     *
+     * document.zip
+     *
+     * containing:
+     *
+     * document-1.jpg
+     * document-2.jpg
+     * document-3.jpg
+     *
+     * or:
+     *
+     * document-1.png
+     * document-2.png
+     * document-3.png
+     * -------------------------------------------------------
+     */
+
+    const zipFiles = [];
+
+    for (
+      let index = 0;
+      index < sources.length;
+      index++
+    ) {
+      const canvas =
+        await renderPageToCanvas(
+          sources[index]
+        );
+
+      const blob =
+        await canvasToBlob(
+          canvas,
+          type,
+          quality
+        );
+
+      const data =
+        new Uint8Array(
+          await blob.arrayBuffer()
+        );
+
+      zipFiles.push({
+        name:
+          exportFileName(
+            doc.name,
+            extension,
+            `-${index + 1}`
+          ),
+
+        data
       });
     }
 
-    await deliverExports(exports, mode, extension.toUpperCase(), sources.length);
+    const zipBytes =
+      buildStoreOnlyZip(zipFiles);
+
+    const zipBlob =
+      new Blob(
+        [zipBytes],
+        {
+          type: "application/zip"
+        }
+      );
+
+    const exports = [{
+      blob: zipBlob,
+
+      fileName:
+        exportFileName(
+          doc.name,
+          "zip"
+        )
+    }];
+
+    await deliverExports(
+      exports,
+      mode,
+      `${extension.toUpperCase()} ZIP`,
+      sources.length
+    );
 
   } catch (error) {
-    console.error(`SmartScan ${extension} export failed:`, error);
+    console.error(
+      `SmartScan ${extension} export failed:`,
+      error
+    );
 
-    showToast(`Could not export the ${extension.toUpperCase()} page.`);
+    showToast(
+      `Could not export the ${extension.toUpperCase()} pages.`
+    );
 
   } finally {
     endExport();
   }
 }
+
+
 
 function showExportSheet(documentId) {
   const doc = getDocument(documentId);
@@ -3694,3 +4565,5 @@ window
 
 applyTheme();
 render();
+//runZipSelfTest();
+
