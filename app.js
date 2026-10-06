@@ -248,6 +248,7 @@ function wait(ms) {
    ========================================================= */
 
 let tesseractWorker = null;
+let tesseractLoading = null;
 
 /*
  * Load Tesseract.js from CDN and create a worker.
@@ -258,13 +259,22 @@ async function loadTesseract() {
     return tesseractWorker;
   }
 
-  try {
-    // Load Tesseract.js from CDN - use named export createWorker
-    const { createWorker } = await import(
-      "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.esm.min.js"
-    );
+  // Ensure Tesseract.js script is loaded
+  if (!window.Tesseract) {
+    if (!tesseractLoading) {
+      tesseractLoading = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js";
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Failed to load Tesseract.js from CDN."));
+        document.head.appendChild(script);
+      });
+    }
+    await tesseractLoading;
+  }
 
-    tesseractWorker = await createWorker("eng", 1, {
+  try {
+    tesseractWorker = await window.Tesseract.createWorker("eng", 1, {
       logger: m => {
         if (m.status === "recognizing text") {
           showToast(`Recognizing text… ${Math.round(m.progress * 100)}%`);
@@ -274,7 +284,7 @@ async function loadTesseract() {
 
     return tesseractWorker;
   } catch (error) {
-    console.error("Failed to load Tesseract.js:", error);
+    console.error("Failed to create Tesseract worker:", error);
     throw new Error("OCR engine failed to load.");
   }
 }
