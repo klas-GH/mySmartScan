@@ -259,12 +259,12 @@ async function loadTesseract() {
   }
 
   try {
-    // Load Tesseract.js from CDN
-    const Tesseract = await import(
+    // Load Tesseract.js from CDN - use named export createWorker
+    const { createWorker } = await import(
       "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.esm.min.js"
     );
 
-    tesseractWorker = await Tesseract.createWorker("eng", 1, {
+    tesseractWorker = await createWorker("eng", 1, {
       logger: m => {
         if (m.status === "recognizing text") {
           showToast(`Recognizing text… ${Math.round(m.progress * 100)}%`);
