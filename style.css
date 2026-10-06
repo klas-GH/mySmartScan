@@ -531,6 +531,26 @@ button:active {
   box-shadow: 0 12px 35px rgba(0,0,0,.35);
 }
 
+/* Saved-crop preview: the untouched original clipped to the crop
+   region. Rotation and filter are applied to the frame so they
+   take effect after the crop, matching the exported result. */
+.crop-result {
+  position: relative;
+  overflow: hidden;
+  line-height: 0;
+  border-radius: 3px;
+  box-shadow: 0 12px 35px rgba(0,0,0,.35);
+}
+
+.crop-result img {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* ---------------------------------------------------------
    Crop
    --------------------------------------------------------- */
@@ -714,7 +734,7 @@ button:active {
   aspect-ratio: .76;
   border-radius: 10px;
   background: #e9ebf0;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .page-actions {

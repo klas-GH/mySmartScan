@@ -68,6 +68,11 @@ const app = {
   // Temporary image being edited
   pendingImage: null,
 
+  // Natural size of the image currently in the editor. Needed to
+  // preview a saved crop, because the crop frame's aspect ratio is
+  // the crop region's aspect ratio in pixels.
+  editorImageSize: null,
+
   // Confirmed crop for a page that does not exist yet.
   // Stored as a fraction of the original image, not pixels.
   pendingCrop: null,
@@ -1182,6 +1187,9 @@ imageInput.addEventListener("change", async event => {
     app.cropDraft = null;
     app.cropMode = false;
 
+    // The natural size is relearned from the new capture.
+    app.editorImageSize = null;
+
     navigate("page-editor");
   } catch (error) {
     console.error(error);
@@ -1459,6 +1467,10 @@ function applyCrop() {
   app.cropMode = false;
   app.cropDraft = null;
 
+  // The live editor image is already loaded here, so its natural
+  // size can be read synchronously to preview the applied crop.
+  rememberEditorImageSize();
+
   renderPageEditor();
 
   showToast(getCropState() ? "Crop applied." : "Crop cleared.");
@@ -1537,6 +1549,71 @@ function getEditState() {
   };
 }
 
+/*
+ * The element that visually carries the editor preview's rotation
+ * and filter. With a saved crop they are applied to the crop frame
+ * so they take effect after the crop; without one they live on the
+ * image itself, exactly as before.
+ */
+function editorVisualTarget() {
+  return document.querySelector(".crop-result") ||
+    document.getElementById("editorImage");
+}
+
+/*
+ * Read the natural size of the image already in the editor.
+ */
+function rememberEditorImageSize() {
+  const image = document.getElementById("editorImage");
+
+  if (image && image.naturalWidth && image.naturalHeight) {
+    app.editorImageSize = {
+      width: image.naturalWidth,
+      height: image.naturalHeight
+    };
+  }
+}
+
+/*
+ * Learn the original's natural size once the editor image loads.
+ * A saved crop can only be previewed after that, because the crop
+ * frame's aspect ratio is the crop region's aspect ratio in pixels.
+ * The size never changes for the same original, so this re-renders
+ * at most once per opened image.
+ */
+function wireEditorImage() {
+  const image = document.getElementById("editorImage");
+
+  if (!image) {
+    return;
+  }
+
+  const onLoad = () => {
+    const width = image.naturalWidth;
+    const height = image.naturalHeight;
+
+    if (!width || !height) {
+      return;
+    }
+
+    const known = app.editorImageSize;
+
+    if (!known || known.width !== width || known.height !== height) {
+      app.editorImageSize = { width, height };
+
+      if (getCropState() && !app.cropMode) {
+        renderPageEditor();
+      }
+    }
+  };
+
+  if (image.complete && image.naturalWidth) {
+    onLoad();
+  } else if (typeof image.addEventListener === "function") {
+    image.addEventListener("load", onLoad);
+  }
+}
+
 function renderPageEditor() {
   if (!app.pendingImage) {
     navigate("scanner");
@@ -1545,7 +1622,32 @@ function renderPageEditor() {
 
   const edit = getEditState();
 
-  const hasCrop = !!getCropState();
+  const crop = getCropState();
+  const size = app.editorImageSize;
+
+  /*
+   * A saved crop is previewed by clipping the untouched original
+   * to the crop region, so the editor shows the same result that
+   * Use Page produces. The crop frame's aspect ratio is the crop
+   * region's aspect ratio in pixels, which needs the original's
+   * natural size. Until that is known (the first render after a
+   * page is reopened) the full original is shown, and
+   * wireEditorImage() re-renders once the size is learned.
+   */
+  const showCrop =
+    !!crop && !app.cropMode && !!size && crop.w > 0 && crop.h > 0;
+
+  const transform = app.cropMode
+    ? "none"
+    : `rotate(${edit.rotation}deg)`;
+
+  const filter = filterStyle(edit.filter);
+
+  let cropRatio = 0;
+
+  if (showCrop) {
+    cropRatio = (crop.w * size.width) / (crop.h * size.height);
+  }
 
   main.innerHTML = `
     <div class="page-heading">
@@ -1554,25 +1656,50 @@ function renderPageEditor() {
     </div>
 
     <div class="editor-preview">
-      <div class="crop-stage">
-        <img
-          id="editorImage"
-          src="${app.pendingImage}"
-          alt="Scanned page"
-          data-rotation="${edit.rotation}"
-          data-filter="${edit.filter}"
+      ${
+        showCrop
+          ? `
+        <div
+          class="crop-result"
           style="
-            transform: ${
-              app.cropMode
-                ? "none"
-                : `rotate(${edit.rotation}deg)`
-            };
-            filter: ${filterStyle(edit.filter)};
+            aspect-ratio: ${cropRatio};
+            width: min(88%, calc(360px * ${cropRatio}));
+            transform: ${transform};
+            filter: ${filter};
           "
-        />
+        >
+          <img
+            id="editorImage"
+            src="${app.pendingImage}"
+            alt="Scanned page"
+            data-rotation="${edit.rotation}"
+            data-filter="${edit.filter}"
+            style="
+              width: ${100 / crop.w}%;
+              left: ${-100 * crop.x / crop.w}%;
+              top: ${-100 * crop.y / crop.h}%;
+            "
+          />
+        </div>
+          `
+          : `
+        <div class="crop-stage">
+          <img
+            id="editorImage"
+            src="${app.pendingImage}"
+            alt="Scanned page"
+            data-rotation="${edit.rotation}"
+            data-filter="${edit.filter}"
+            style="
+              transform: ${transform};
+              filter: ${filter};
+            "
+          />
 
-        ${cropOverlayMarkup()}
-      </div>
+          ${cropOverlayMarkup()}
+        </div>
+          `
+      }
     </div>
 
     <div class="editor-tools">
@@ -1590,7 +1717,7 @@ function renderPageEditor() {
         id="cropBtn"
       >
         <span>⌗</span>
-        <span>${hasCrop ? "Crop ✓" : "Crop"}</span>
+        <span>${!!crop ? "Crop ✓" : "Crop"}</span>
       </button>
 
       <button class="tool-btn" id="perspectiveBtn">
@@ -1713,6 +1840,8 @@ function renderPageEditor() {
       button.classList.add("active");
     });
   });
+
+  wireEditorImage();
 }
 
 function filterButton(id, label, active = false) {
@@ -1734,7 +1863,7 @@ function rotateEditorImage() {
   const next = current + 90;
 
   image.dataset.rotation = next;
-  image.style.transform = `rotate(${next}deg)`;
+  editorVisualTarget().style.transform = `rotate(${next}deg)`;
 
   showToast("Page rotated.");
 }
@@ -1748,7 +1877,7 @@ function applyFilter(filter) {
 
   image.dataset.filter = filter;
 
-  image.style.filter = filterStyle(filter);
+  editorVisualTarget().style.filter = filterStyle(filter);
 }
 
 function resetEditorImage() {
@@ -2268,6 +2397,9 @@ function handlePageAction(documentId, pageId, action) {
     app.pendingImage =
       page.originalImagePath ||
       page.processedImagePath;
+
+    // The natural size must be relearned for the newly opened image.
+    app.editorImageSize = null;
 
     app.editingPageId = page.id;
 
