@@ -180,9 +180,34 @@ function imageKey() {
 
 /*
  * In-memory cache for data URLs (for fast synchronous rendering).
- * Keyed by IndexedDB key (img_*).
+ * Keyed by IndexedDB key (img_*). Bounded to prevent unbounded memory growth.
+ * Uses simple LRU eviction when limit is reached.
  */
+const IMAGE_CACHE_MAX_SIZE = 50;
 const imageDataUrlCache = new Map();
+
+function cacheSet(key, value) {
+  if (imageDataUrlCache.size >= IMAGE_CACHE_MAX_SIZE) {
+    // Remove oldest entry (first inserted)
+    const firstKey = imageDataUrlCache.keys().next().value;
+    if (firstKey) imageDataUrlCache.delete(firstKey);
+  }
+  imageDataUrlCache.set(key, value);
+}
+
+function cacheGet(key) {
+  const value = imageDataUrlCache.get(key);
+  // Move to end (most recently used)
+  if (value !== undefined) {
+    imageDataUrlCache.delete(key);
+    imageDataUrlCache.set(key, value);
+  }
+  return value;
+}
+
+function cacheDelete(key) {
+  imageDataUrlCache.delete(key);
+}
 
 /*
  * Convert a data URL to a Blob for IndexedDB storage.
@@ -244,7 +269,7 @@ async function storeImage(imageData) {
   }
 
   // Cache for fast synchronous access
-  imageDataUrlCache.set(key, dataUrl);
+  cacheSet(key, dataUrl);
   return key;
 }
 
@@ -262,14 +287,14 @@ async function resolveImage(key) {
   }
 
   // Check cache first (synchronous)
-  const cached = imageDataUrlCache.get(key);
+  const cached = cacheGet(key);
   if (cached) return cached;
 
   // Fall back to IndexedDB (async)
   const blob = await getImageBlob(key);
   if (!blob) return "";
   const dataUrl = await blobToDataUrl(blob);
-  imageDataUrlCache.set(key, dataUrl);
+  cacheSet(key, dataUrl);
   return dataUrl;
 }
 
@@ -281,7 +306,7 @@ function resolveImageSync(key) {
   if (!key) return "";
   if (typeof key === "string" && key.startsWith("data:")) return key;
   if (typeof key === "string" && key.startsWith("blob:")) return key;
-  return imageDataUrlCache.get(key) || key;
+  return cacheGet(key) || key;
 }
 
 /*
@@ -913,6 +938,7 @@ function loadState() {
 
 /*
  * Extract images to IndexedDB and save state with keys.
+ * Returns true on success, false on failure.
  */
 async function saveStateAsync() {
   try {
@@ -920,25 +946,69 @@ async function saveStateAsync() {
 
     const serialized = JSON.stringify(stateForStorage);
 
+    // Verify no data URLs leaked into localStorage
+    if (serialized.includes("data:image/")) {
+      console.warn("WARNING: data URLs found in state serialization!");
+    }
+
     localStorage.setItem(STORAGE_KEY, serialized);
 
     return true;
   } catch (error) {
     console.error("Failed to save SmartScan state:", error);
 
+    // Provide specific error messages for common IndexedDB failures
+    let message = "Could not save your changes.";
     if (error.name === "QuotaExceededError") {
-      showToast("Storage is full. Delete an old document and try again.");
-    } else {
-      showToast("Could not save your changes.");
+      message = "Storage is full. Delete an old document and try again.";
+    } else if (error.name === "ConstraintError" || error.name === "DataError") {
+      message = "Storage error: data could not be written.";
+    } else if (error.name === "SecurityError" || error.message?.includes("private")) {
+      message = "Storage unavailable in private/incognito mode.";
+    } else if (error.name === "UnknownError" || error.name === "AbortError") {
+      message = "Storage operation failed. Please try again.";
     }
+
+    showToast(message);
     return false;
   }
 }
 
-/* Synchronous wrapper for backward compatibility */
-function saveState() {
-  saveStateAsync();
-  return true;
+/*
+ * Verify localStorage contains only img_* keys, no data URLs.
+ * Returns true if clean, false if data URLs found.
+ */
+function verifyLocalStorageClean() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return true;
+    return !raw.includes("data:image/");
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * Migrate legacy data URLs in localStorage to IndexedDB.
+ * Call once after loading state if localStorage contains data URLs.
+ */
+async function migrateLegacyImages() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return true;
+
+  if (!raw.includes("data:image/")) {
+    return true; // Already clean
+  }
+
+  try {
+    console.log("Migrating legacy images to IndexedDB...");
+    await saveStateAsync();
+    console.log("Migration complete.");
+    return true;
+  } catch (error) {
+    console.error("Migration failed:", error);
+    return false;
+  }
 }
 
 /*
@@ -949,21 +1019,21 @@ async function restoreImagesInState() {
   state = await restoreImagesFromStorage(state);
 }
 
-/*
- * Synchronous saveState for backward compatibility.
+/* Synchronous wrapper for backward compatibility.
  * Queues async save with image extraction.
+ * Returns a promise that resolves when save is complete.
  */
 let saveStatePending = false;
 
 function saveState() {
-  if (saveStatePending) return true;
+  if (saveStatePending) {
+    return Promise.resolve(true);
+  }
   saveStatePending = true;
 
-  saveStateAsync().finally(() => {
+  return saveStateAsync().finally(() => {
     saveStatePending = false;
   });
-
-  return true;
 }
 
 function startScanner() {
@@ -5338,7 +5408,44 @@ window
    INITIALIZE
    ========================================================= */
 
+/* =========================================================
+   INITIALIZE
+   ========================================================= */
+
 applyTheme();
+
+// Fire-and-forget async initialization (non-blocking)
+(async () => {
+  // Request persistent storage if supported
+  if (navigator.storage?.persist) {
+    try {
+      const persistent = await navigator.storage.persist();
+      console.log("Persistent storage:", persistent);
+    } catch {}
+  }
+
+  // Monitor storage estimate if supported
+  if (navigator.storage?.estimate) {
+    try {
+      const { usage, quota } = await navigator.storage.estimate();
+      console.log(
+        `Storage: ${(usage / 1024 / 1024).toFixed(1)} MB / ` +
+        `${(quota / 1024 / 1024).toFixed(1)} MB`
+      );
+    } catch {}
+  }
+
+  // Restore image data URLs from IndexedDB before initial render
+  await restoreImagesInState().catch(err => {
+    console.error("Failed to restore images:", err);
+  });
+
+  // Migrate any legacy data URLs in localStorage to IndexedDB
+  await migrateLegacyImages().catch(err => {
+    console.error("Legacy image migration failed:", err);
+  });
+})();
+
 render();
-//runZipSelfTest();
+// runZipSelfTest();
 
