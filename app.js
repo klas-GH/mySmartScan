@@ -2504,10 +2504,6 @@ function renderDocumentEditor() {
       <button id="addPageBtn" class="secondary-btn">
         ＋ Add page
       </button>
-
-      <button id="saveDocumentBtn" class="primary-btn">
-        Save
-      </button>
     </div>
 
     <button
@@ -2543,19 +2539,10 @@ function renderDocumentEditor() {
       saveState();
     });
 
-  document
+document
   	.getElementById("addPageBtn")
- 	 ?.addEventListener("click", () => {
-    	startScannerForDocument(doc.id);
-   });
-
-
-  document
-    .getElementById("saveDocumentBtn")
-    ?.addEventListener("click", () => {
-      doc.updatedAt = now();
-      saveState();
-      showToast("Document saved.");
+  	 ?.addEventListener("click", () => {
+     	startScannerForDocument(doc.id);
     });
 
   document
