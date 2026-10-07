@@ -24,6 +24,303 @@ const defaultState = {
 
 let state = loadState();
 
+/* =========================================================
+   INDEXEDDB — Image blob storage
+   ========================================================= */
+
+const DB_NAME = "smartscan-images";
+const DB_VERSION = 1;
+const IMAGE_STORE = "images";
+
+let imageDb = null;
+
+/* In-memory fallback for environments without IndexedDB (e.g., tests) */
+const memoryImageStore = new Map();
+
+function hasIndexedDB() {
+  try {
+    return typeof indexedDB !== "undefined" && indexedDB !== null;
+  } catch {
+    return false;
+  }
+}
+
+function openImageDb() {
+  // Use in-memory store if IndexedDB not available
+  if (!hasIndexedDB()) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve, reject) => {
+    if (imageDb) {
+      resolve(imageDb);
+      return;
+    }
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(IMAGE_STORE)) {
+        db.createObjectStore(IMAGE_STORE);
+      }
+    };
+    request.onsuccess = () => {
+      imageDb = request.result;
+      resolve(imageDb);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveImageBlob(key, blob) {
+  if (!hasIndexedDB()) {
+    memoryImageStore.set(key, blob);
+    return;
+  }
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_STORE, "readwrite");
+    tx.objectStore(IMAGE_STORE).put(blob, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getImageBlob(key) {
+  if (!hasIndexedDB()) {
+    return memoryImageStore.get(key) || undefined;
+  }
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_STORE, "readonly");
+    const request = tx.objectStore(IMAGE_STORE).get(key);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteImageBlob(key) {
+  if (!hasIndexedDB()) {
+    memoryImageStore.delete(key);
+    return;
+  }
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_STORE, "readwrite");
+    tx.objectStore(IMAGE_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/*
+ * Extract all image data URLs from state, store blobs in IndexedDB,
+ * and replace with keys in the state object for localStorage.
+ */
+async function extractImagesForStorage(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+
+  if (Array.isArray(obj)) {
+    return Promise.all(obj.map(extractImagesForStorage));
+  }
+
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string" && value.startsWith("data:image/")) {
+      result[key] = await storeImage(value);
+    } else if (value && typeof value === "object") {
+      result[key] = await extractImagesForStorage(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/*
+ * Restore image data URLs from IndexedDB keys in state.
+ */
+async function restoreImagesFromStorage(obj) {
+  if (!obj || typeof obj !== "object") return obj;
+
+  if (Array.isArray(obj)) {
+    return Promise.all(obj.map(restoreImagesFromStorage));
+  }
+
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "string" && value.startsWith("img_")) {
+      result[key] = await resolveImage(value);
+    } else if (value && typeof value === "object") {
+      result[key] = await restoreImagesFromStorage(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/*
+ * Convert a Blob to a data URL for UI rendering.
+ */
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/*
+ * Generate a unique key for an image.
+ */
+function imageKey() {
+  return `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/*
+ * In-memory cache for data URLs (for fast synchronous rendering).
+ * Keyed by IndexedDB key (img_*).
+ */
+const imageDataUrlCache = new Map();
+
+/*
+ * Convert a data URL to a Blob for IndexedDB storage.
+ * Works in browser (fetch) and Node.js (manual base64 decode).
+ */
+async function dataUrlToBlob(dataUrl) {
+  if (typeof fetch === "function") {
+    try {
+      const res = await fetch(dataUrl);
+      return res.blob();
+    } catch {
+      // fall through
+    }
+  }
+  // Manual base64 decode fallback
+  const marker = dataUrl.indexOf("base64,");
+  if (marker === -1) throw new Error("Invalid data URL");
+  const base64 = dataUrl.slice(marker + 7);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes]);
+}
+
+/*
+ * Convert a Blob to a data URL for UI rendering.
+ */
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/*
+ * Store an image (data URL or Blob) in IndexedDB and return its key.
+ * If it's already a key (starts with "img_"), return as-is.
+ * Also caches the data URL for fast synchronous access.
+ */
+async function storeImage(imageData) {
+  if (typeof imageData === "string" && imageData.startsWith("img_")) {
+    return imageData;
+  }
+  const key = imageKey();
+  let dataUrl;
+
+  if (typeof imageData === "string") {
+    dataUrl = imageData;
+    const blob = await dataUrlToBlob(imageData);
+    await saveImageBlob(key, blob);
+  } else {
+    const blob = imageData;
+    await saveImageBlob(key, blob);
+    dataUrl = await blobToDataUrl(blob);
+  }
+
+  // Cache for fast synchronous access
+  imageDataUrlCache.set(key, dataUrl);
+  return key;
+}
+
+/*
+ * Resolve an image key to a data URL for UI display.
+ * Checks in-memory cache first (synchronous), then IndexedDB (async).
+ */
+async function resolveImage(key) {
+  if (!key) return "";
+  if (typeof key === "string" && key.startsWith("data:")) {
+    return key; // already a data URL (legacy)
+  }
+  if (typeof key === "string" && key.startsWith("blob:")) {
+    return key; // blob URL (legacy)
+  }
+
+  // Check cache first (synchronous)
+  const cached = imageDataUrlCache.get(key);
+  if (cached) return cached;
+
+  // Fall back to IndexedDB (async)
+  const blob = await getImageBlob(key);
+  if (!blob) return "";
+  const dataUrl = await blobToDataUrl(blob);
+  imageDataUrlCache.set(key, dataUrl);
+  return dataUrl;
+}
+
+/*
+ * Synchronous resolve for rendering - uses cache only.
+ * Returns data URL if in cache, otherwise the key itself (for test compatibility).
+ */
+function resolveImageSync(key) {
+  if (!key) return "";
+  if (typeof key === "string" && key.startsWith("data:")) return key;
+  if (typeof key === "string" && key.startsWith("blob:")) return key;
+  return imageDataUrlCache.get(key) || key;
+}
+
+/*
+ * Delete an image from IndexedDB.
+ */
+async function removeImage(key) {
+  if (!key || typeof key !== "string" || !key.startsWith("img_")) return;
+  await deleteImageBlob(key);
+}
+
+/*
+ * Clean up orphaned images from IndexedDB.
+ * Keeps only images referenced by current state.
+ */
+async function gcImages() {
+  const db = await openImageDb();
+  const tx = db.transaction(IMAGE_STORE, "readonly");
+  const allKeys = await new Promise((resolve, reject) => {
+    const request = tx.objectStore(IMAGE_STORE).getAllKeys();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  const referenced = new Set();
+  for (const doc of state.documents) {
+    for (const page of doc.pages) {
+      if (page.originalImagePath) referenced.add(page.originalImagePath);
+      if (page.processedImagePath) referenced.add(page.processedImagePath);
+      if (page.thumbnailPath) referenced.add(page.thumbnailPath);
+    }
+  }
+
+  for (const key of allKeys) {
+    if (!referenced.has(key)) {
+      await deleteImageBlob(key);
+    }
+  }
+}
+
 /*
 function loadState() {
   try {
@@ -295,10 +592,17 @@ async function loadTesseract() {
  * Reuses the existing editing pipeline logic.
  */
 async function renderPageForOcr(page) {
-  const original = page.originalImagePath || page.processedImagePath;
+  const originalKey = page.originalImagePath || page.processedImagePath;
+
+  if (!originalKey) {
+    throw new Error("No image available for OCR.");
+  }
+
+  // Resolve image key to data URL for OCR
+  const original = await resolveImage(originalKey);
 
   if (!original) {
-    throw new Error("No image available for OCR.");
+    throw new Error("Could not load image for OCR.");
   }
 
   const image = new Image();
@@ -607,33 +911,59 @@ function loadState() {
   }
 }
 
-
-function saveState() {
+/*
+ * Extract images to IndexedDB and save state with keys.
+ */
+async function saveStateAsync() {
   try {
-    const serialized = JSON.stringify(state);
+    const stateForStorage = await extractImagesForStorage(state);
 
-    localStorage.setItem(
-      STORAGE_KEY,
-      serialized
-    );
+    const serialized = JSON.stringify(stateForStorage);
+
+    localStorage.setItem(STORAGE_KEY, serialized);
 
     return true;
-
   } catch (error) {
     console.error("Failed to save SmartScan state:", error);
 
     if (error.name === "QuotaExceededError") {
-      showToast(
-        "Storage is full. Delete an old document and try again."
-      );
+      showToast("Storage is full. Delete an old document and try again.");
     } else {
-      showToast(
-        "Could not save your changes."
-      );
+      showToast("Could not save your changes.");
     }
-
     return false;
   }
+}
+
+/* Synchronous wrapper for backward compatibility */
+function saveState() {
+  saveStateAsync();
+  return true;
+}
+
+/*
+ * Restore image data URLs from IndexedDB keys in state.
+ * Call after loadState() to populate data URLs for rendering.
+ */
+async function restoreImagesInState() {
+  state = await restoreImagesFromStorage(state);
+}
+
+/*
+ * Synchronous saveState for backward compatibility.
+ * Queues async save with image extraction.
+ */
+let saveStatePending = false;
+
+function saveState() {
+  if (saveStatePending) return true;
+  saveStatePending = true;
+
+  saveStateAsync().finally(() => {
+    saveStatePending = false;
+  });
+
+  return true;
 }
 
 function startScanner() {
@@ -1270,10 +1600,12 @@ function renderScanSession() {
 
   const pageCount = doc.pages.length;
 
-  const thumbnail =
+  const thumbnailKey =
     doc.pages?.[pageCount - 1]?.processedImagePath ||
     doc.pages?.[pageCount - 1]?.originalImagePath ||
     "";
+
+  const thumbnailSrc = resolveImageSync(thumbnailKey);
 
   main.innerHTML = `
     <section class="scan-session">
@@ -1287,11 +1619,11 @@ function renderScanSession() {
       </div>
 
       ${
-        thumbnail
+        thumbnailSrc
           ? `
             <div class="editor-preview">
               <img
-                src="${thumbnail}"
+                src="${thumbnailSrc}"
                 alt="Last scanned page"
               />
             </div>
@@ -1449,9 +1781,17 @@ imageInput.addEventListener("change", async event => {
   }
 
   try {
-    const imageData = await fileToDataUrl(file);
+    // Convert file to blob and store in IndexedDB
+    const blob = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
 
-    app.pendingImage = imageData;
+    const key = await storeImage(new Blob([blob], { type: file.type }));
+
+    app.pendingImage = key;
 
     // A fresh capture starts with no crop.
     app.pendingCrop = null;
@@ -1892,6 +2232,19 @@ function renderPageEditor() {
     return;
   }
 
+  // Resolve image key to data URL for display (synchronous, uses cache)
+  const imageSrc = resolveImageSync(app.pendingImage);
+
+  // If not in cache yet, trigger async resolution and re-render when done
+  if (!imageSrc) {
+    resolveImage(app.pendingImage).then(dataUrl => {
+      if (dataUrl && app.route === "page-editor") {
+        renderPageEditor();
+      }
+    });
+    // Show placeholder or wait for async resolution
+  }
+
   const edit = getEditState();
 
   const crop = getCropState();
@@ -1942,7 +2295,7 @@ function renderPageEditor() {
         >
           <img
             id="editorImage"
-            src="${app.pendingImage}"
+            src="${imageSrc}"
             alt="Scanned page"
             data-rotation="${edit.rotation}"
             data-filter="${edit.filter}"
@@ -1958,7 +2311,7 @@ function renderPageEditor() {
         <div class="crop-stage">
           <img
             id="editorImage"
-            src="${app.pendingImage}"
+            src="${imageSrc}"
             alt="Scanned page"
             data-rotation="${edit.rotation}"
             data-filter="${edit.filter}"
@@ -2204,7 +2557,7 @@ async function usePage() {
 
   const source = new Image();
 
-  source.onload = () => {
+  source.onload = async () => {
     /*
      * Crop comes first and is expressed as a fraction of the pristine
      * original, so it is applied before rotation and never compounds
@@ -2264,8 +2617,9 @@ async function usePage() {
       sourceHeight
     );
 
-    const processedImage =
-      canvas.toDataURL("image/jpeg", 0.78);
+    const processedImage = canvas.toDataURL("image/jpeg", 0.78);
+
+    const processedKey = await storeImage(processedImage);
 
     /*
      * =====================================================
@@ -2281,8 +2635,8 @@ async function usePage() {
       );
 
       if (doc && existingPage) {
-        existingPage.processedImagePath = processedImage;
-        existingPage.thumbnailPath = processedImage;
+        existingPage.processedImagePath = processedKey;
+        existingPage.thumbnailPath = processedKey;
         existingPage.rotation = rotation;
         existingPage.filter = selectedFilter;
         existingPage.crop = crop;
@@ -2318,10 +2672,10 @@ async function usePage() {
         app.pendingImage,
 
       processedImagePath:
-        processedImage,
+        processedKey,
 
       thumbnailPath:
-        processedImage,
+        processedKey,
 
       rotation,
 
@@ -2403,7 +2757,7 @@ async function usePage() {
    DOCUMENT CREATION
    ========================================================= */
 
-function createDocumentFromScanner(options = {}) {
+async function createDocumentFromScanner(options = {}) {
   if (!app.scannerPages.length) {
     showToast("No scanned pages.");
     return;
@@ -2411,31 +2765,35 @@ function createDocumentFromScanner(options = {}) {
 
   const timestamp = now();
 
-  const pages = app.scannerPages.map((page, index) => ({
-    id: page.id || createId(),
+  // Store all page images in IndexedDB and get their keys
+  const pages = await Promise.all(app.scannerPages.map(async (page, index) => {
+    const originalKey = await storeImage(page.originalImagePath);
+    const processedKey = page.processedImagePath
+      ? await storeImage(page.processedImagePath)
+      : originalKey;
+    const thumbnailKey = page.thumbnailPath
+      ? await storeImage(page.thumbnailPath)
+      : originalKey;
 
-    documentId: null,
+    return {
+      id: page.id || createId(),
 
-    order: index,
+      documentId: null,
 
-    originalImagePath:
-      page.originalImagePath,
+      order: index,
 
-    processedImagePath:
-      page.processedImagePath ||
-      page.originalImagePath,
+      originalImagePath: originalKey,
 
-    thumbnailPath:
-      page.processedImagePath ||
-      page.originalImagePath,
+      processedImagePath: processedKey,
 
-    rotation:
-      page.rotation || 0,
+      thumbnailPath: thumbnailKey,
 
-    filter:
-      page.filter || "original",
+      rotation: page.rotation || 0,
 
-    crop: page.crop || null
+      filter: page.filter || "original",
+
+      crop: page.crop || null
+    };
   }));
 
   const docId = createId();
@@ -2555,10 +2913,12 @@ document
 }
 
 function pageCard(document, page, index) {
-  const image =
+  const imageKey =
     page.processedImagePath ||
     page.originalImagePath ||
     "";
+
+  const imageSrc = resolveImageSync(imageKey);
 
   return `
     <article class="page-card">
@@ -2568,8 +2928,8 @@ function pageCard(document, page, index) {
       </span>
 
       ${
-        image
-          ? `<img class="page-image" src="${image}" alt="Page ${index + 1}" />`
+        imageSrc
+          ? `<img class="page-image" src="${imageSrc}" alt="Page ${index + 1}" />`
           : `<div class="page-image"></div>`
       }
 
@@ -3271,7 +3631,14 @@ function endExport() {
   app.busy = false;
 }
 
-function loadImageElement(source) {
+async function loadImageElement(source) {
+  // Resolve IndexedDB key to data URL if needed
+  const dataUrl = await resolveImage(source);
+
+  if (!dataUrl) {
+    throw new Error("Could not load a page image.");
+  }
+
   return new Promise((resolve, reject) => {
     const image = new Image();
 
@@ -3279,7 +3646,7 @@ function loadImageElement(source) {
     image.onerror = () =>
       reject(new Error("Could not load a page image."));
 
-    image.src = source;
+    image.src = dataUrl;
   });
 }
 
