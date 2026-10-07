@@ -917,15 +917,12 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.0.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.2.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally.
         Your files stay on this device.
       </p>
-      <button class="primary-btn" id="heroScanBtn">
-        Scan your document
-      </button>
     </section>
 
     <section class="section">
@@ -968,10 +965,6 @@ function renderHome() {
       }
     </section>
   `;
-
-  document
-    .getElementById("heroScanBtn")
-    ?.addEventListener("click", startScanner);
 
   document
     .getElementById("viewAllBtn")
