@@ -1240,35 +1240,13 @@ function renderScanner() {
 
       <div class="scanner-controls">
 
-        <div class="scanner-top-controls">
-          <button class="scanner-control" id="galleryBtn">
-            ▧
-          </button>
-        </div>
-
         <div class="capture-row">
-
-          <button
-            class="scanner-control"
-            id="manualButton"
-            title="Manual capture"
-          >
-            ＋
-          </button>
 
           <button
             class="capture-button"
             id="captureButton"
             aria-label="Capture"
           ></button>
-
-          <button
-            class="scanner-control"
-            id="finishScanButton"
-            title="Finish"
-          >
-            ✓
-          </button>
 
         </div>
 
@@ -1279,18 +1257,6 @@ function renderScanner() {
   document
     .getElementById("captureButton")
     ?.addEventListener("click", chooseImage);
-
-  document
-    .getElementById("manualButton")
-    ?.addEventListener("click", chooseImage);
-
-  document
-    .getElementById("galleryBtn")
-    ?.addEventListener("click", chooseImage);
-
-  document
-    .getElementById("finishScanButton")
-    ?.addEventListener("click", finishScanning);
 }
 
 
