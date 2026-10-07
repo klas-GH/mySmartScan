@@ -2906,6 +2906,9 @@ async function createDocumentFromScanner(options = {}) {
 
   saveState();
 
+  // Restore new document's images to data URLs for immediate rendering
+  await restoreImagesInState();
+
   app.activeDocumentId = docId;
 
   clearScannerSession();
