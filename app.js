@@ -5450,8 +5450,9 @@ applyTheme();
   await migrateLegacyImages().catch(err => {
     console.error("Legacy image migration failed:", err);
   });
-})();
 
-render();
+  // Initial render after images are restored
+  render();
+})();
 // runZipSelfTest();
 
