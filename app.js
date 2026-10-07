@@ -2818,7 +2818,13 @@ async function usePage() {
     showToast("Could not process the page.");
   };
 
-  source.src = app.pendingImage;
+  // Resolve img_* key to data URL for processing
+  const resolvedSrc = await resolveImage(app.pendingImage);
+  if (!resolvedSrc) {
+    showToast("Could not load image for processing.");
+    return;
+  }
+  source.src = resolvedSrc;
 }
 
 /////part2
