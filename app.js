@@ -1166,8 +1166,17 @@ function navigate(route, options = {}) {
   }
 
   app.route = route;
-  render();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  // Wait for initialization to complete before rendering
+  if (typeof appInitialization !== "undefined") {
+    appInitialization.then(() => {
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  } else {
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 
 function goBack() {
@@ -5399,7 +5408,11 @@ document.querySelectorAll(".nav-item").forEach(item => {
 
 window.addEventListener("storage", () => {
   state = loadState();
-  render();
+  if (typeof appInitialization !== "undefined") {
+    appInitialization.then(() => render());
+  } else {
+    render();
+  }
 });
 
 window
@@ -5420,8 +5433,8 @@ window
 
 applyTheme();
 
-// Fire-and-forget async initialization (non-blocking)
-(async () => {
+// Global initialization promise
+let appInitialization = (async () => {
   // Request persistent storage if supported
   if (navigator.storage?.persist) {
     try {
@@ -5451,7 +5464,6 @@ applyTheme();
     console.error("Legacy image migration failed:", err);
   });
 
-  // Initial render after images are restored
   render();
 })();
 // runZipSelfTest();
