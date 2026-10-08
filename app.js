@@ -20,7 +20,8 @@ const defaultState = {
     defaultFilter: "original",
     defaultExportFormat: "pdf",
     ocrLanguage: "eng",
-    ocrPreprocess: "adaptive" // "adaptive" | "grayscale" | "none"
+    ocrPreprocess: "adaptive",
+    ocrPsm: "auto" // "auto" | "single_block" | "single_line" | "word" | "raw_line"
   }
 };
 
@@ -680,6 +681,23 @@ async function loadTesseract() {
       }
     });
 
+    // Apply PSM setting after worker creation
+    try {
+      const psmMap = {
+        auto: 3,            // PSM.AUTO = 3
+        single_block: 6,    // PSM.SINGLE_BLOCK = 6
+        single_line: 7,     // PSM.SINGLE_LINE = 7
+        word: 8,            // PSM.SINGLE_WORD = 8
+        raw_line: 13        // PSM.RAW_LINE = 13
+      };
+      const psmValue = psmMap[state.settings.ocrPsm] ?? 3;
+      await tesseractWorker.setParameters({
+        tessedit_pageseg_mode: psmValue
+      });
+    } catch (e) {
+      console.warn("Could not set OCR PSM:", e);
+    }
+
     return tesseractWorker;
   } catch (error) {
     console.error("Failed to create Tesseract worker:", error);
@@ -1131,7 +1149,8 @@ function loadState() {
           defaultFilter: "original",
           defaultExportFormat: "pdf",
           ocrLanguage: "eng",
-          ocrPreprocess: "adaptive"
+          ocrPreprocess: "adaptive",
+          ocrPsm: "auto"
         }
       };
     }
@@ -1154,7 +1173,8 @@ function loadState() {
         defaultExportFormat:
           parsed.settings?.defaultExportFormat || "pdf",
         ocrLanguage: parsed.settings?.ocrLanguage || "eng",
-        ocrPreprocess: parsed.settings?.ocrPreprocess || "adaptive"
+        ocrPreprocess: parsed.settings?.ocrPreprocess || "adaptive",
+        ocrPsm: parsed.settings?.ocrPsm || "auto"
       }
     };
 
@@ -1169,7 +1189,8 @@ function loadState() {
         defaultFilter: "original",
         defaultExportFormat: "pdf",
         ocrLanguage: "eng",
-        ocrPreprocess: "adaptive"
+        ocrPreprocess: "adaptive",
+        ocrPsm: "auto"
       }
     };
   }
@@ -1487,7 +1508,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.5.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.6.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5626,6 +5647,31 @@ function renderSettings() {
           </select>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>OCR page segmentation</strong>
+            <small>How Tesseract interprets text layout.</small>
+          </div>
+
+          <select id="ocrPsmSetting">
+            <option value="auto" ${state.settings.ocrPsm === "auto" ? "selected" : ""}>
+              Auto (fully automatic)
+            </option>
+            <option value="single_block" ${state.settings.ocrPsm === "single_block" ? "selected" : ""}>
+              Single block of text
+            </option>
+            <option value="single_line" ${state.settings.ocrPsm === "single_line" ? "selected" : ""}>
+              Single text line
+            </option>
+            <option value="word" ${state.settings.ocrPsm === "word" ? "selected" : ""}>
+              Single word
+            </option>
+            <option value="raw_line" ${state.settings.ocrPsm === "raw_line" ? "selected" : ""}>
+              Raw line (bypass hOCR)
+            </option>
+          </select>
+        </div>
+
       </div>
 
     </section>
@@ -5670,7 +5716,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.5.0</h2>
+        <h2>SmartScan V1.6.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -5690,6 +5736,9 @@ function renderSettings() {
 
   document.getElementById("ocrPreprocessSetting").value =
     state.settings.ocrPreprocess;
+
+  document.getElementById("ocrPsmSetting").value =
+    state.settings.ocrPsm;
 
   document
     .getElementById("themeSetting")
@@ -5730,6 +5779,18 @@ function renderSettings() {
     .addEventListener("change", event => {
       state.settings.ocrPreprocess = event.target.value;
       saveState();
+    });
+
+  document
+    .getElementById("ocrPsmSetting")
+    .addEventListener("change", event => {
+      state.settings.ocrPsm = event.target.value;
+      saveState();
+      // Terminate cached worker so next OCR uses new PSM
+      if (tesseractWorker) {
+        tesseractWorker.terminate();
+        tesseractWorker = null;
+      }
     });
 
   document
