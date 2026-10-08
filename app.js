@@ -168,11 +168,27 @@ function imageKey() {
 
 /*
  * In-memory cache for data URLs (for fast synchronous rendering).
- * Keyed by IndexedDB key (img_*). Bounded to prevent unbounded memory growth.
- * Uses simple LRU eviction when limit is reached.
+ * Keyed by IndexedDB key (img_*). Bounded to prevent unbounded memory
+ * growth. The cap scales with the number of pages the user has
+ * actually scanned, so a 50-page document does not thrash the cache.
+ * Uses simple LRU eviction when the limit is reached.
  */
-const IMAGE_CACHE_MAX_SIZE = 50;
+const IMAGE_CACHE_MIN_SIZE = 20;
+const IMAGE_CACHE_MAX_SIZE = 120;
 const imageDataUrlCache = new Map();
+
+function imageCacheLimit() {
+  let pages = 0;
+  if (state && Array.isArray(state.documents)) {
+    for (const doc of state.documents) {
+      pages += Array.isArray(doc.pages) ? doc.pages.length : 0;
+    }
+  }
+  return Math.max(
+    IMAGE_CACHE_MIN_SIZE,
+    Math.min(IMAGE_CACHE_MAX_SIZE, pages + IMAGE_CACHE_MIN_SIZE)
+  );
+}
 
 /*
  * Tiny inline SVG placeholder used when a real image is not yet in the
@@ -189,7 +205,9 @@ const PLACEHOLDER_DATA_URL =
   );
 
 function cacheSet(key, value) {
-  if (imageDataUrlCache.size >= IMAGE_CACHE_MAX_SIZE) {
+  const limit = imageCacheLimit();
+
+  if (imageDataUrlCache.size >= limit) {
     // Remove oldest entry (first inserted)
     const firstKey = imageDataUrlCache.keys().next().value;
     if (firstKey) imageDataUrlCache.delete(firstKey);
@@ -419,8 +437,6 @@ const app = {
   // Scanner session
   scannerPages: [],
 
-  // Scanner state
-  scannerActive: false,
 
   // Current folder
   activeFolderId: null,
@@ -575,6 +591,27 @@ function wait(ms) {
 
 let tesseractWorker = null;
 let tesseractLoading = null;
+let ocrProgress = 0;
+
+/*
+ * Update the OCR loading modal's progress bar. Tesseract reports
+ * progress through the worker logger; we surface it as a determinate
+ * bar instead of an indeterminate spinner so the user gets a real
+ * sense of how long recognition will take.
+ */
+function updateOcrProgress(percent) {
+  ocrProgress = Math.max(0, Math.min(100, percent));
+
+  const fill = document.getElementById("ocrProgressFill");
+  const label = document.getElementById("ocrProgressLabel");
+
+  if (fill) {
+    fill.style.width = `${ocrProgress}%`;
+  }
+  if (label) {
+    label.textContent = `${ocrProgress}%`;
+  }
+}
 
 /*
  * Load Tesseract.js from CDN and create a worker.
@@ -602,8 +639,15 @@ async function loadTesseract() {
   try {
     tesseractWorker = await window.Tesseract.createWorker("eng", 1, {
       logger: m => {
+        // Surface recognition progress on the loading modal's bar
+        // when one is open; otherwise fall back to a toast.
         if (m.status === "recognizing text") {
-          showToast(`Recognizing text… ${Math.round(m.progress * 100)}%`);
+          const percent = Math.round(m.progress * 100);
+          if (document.getElementById("ocrProgressFill")) {
+            updateOcrProgress(percent);
+          } else {
+            showToast(`Recognizing text… ${percent}%`);
+          }
         }
       }
     });
@@ -751,9 +795,11 @@ async function openOcrModal(page) {
 }
 
 /*
- * Show OCR loading modal.
+ * Show OCR loading modal with a determinate progress bar.
  */
 function showOcrLoadingModal(page) {
+  updateOcrProgress(0);
+
   modalRoot.innerHTML = `
     <div class="modal-backdrop" id="ocrModal">
       <div class="modal">
@@ -761,6 +807,13 @@ function showOcrLoadingModal(page) {
         <div style="text-align:center;padding:24px;">
           <div style="font-size:18px;margin-bottom:12px;">Recognizing text…</div>
           <div class="spinner" style="margin:0 auto;"></div>
+
+          <div style="margin-top:18px;width:100%;max-width:260px;margin-left:auto;margin-right:auto;">
+            <div style="height:8px;background:var(--border);border-radius:999px;overflow:hidden;">
+              <div id="ocrProgressFill" style="height:100%;width:0%;background:var(--primary);transition:width .15s ease;"></div>
+            </div>
+            <div id="ocrProgressLabel" style="font-size:12px;color:var(--text-secondary);margin-top:6px;">0%</div>
+          </div>
         </div>
       </div>
     </div>
@@ -853,6 +906,10 @@ function showOcrErrorModal(page, message) {
 
 /*
  * Copy OCR text to clipboard.
+ *
+ * navigator.clipboard.writeText can reject outside a secure context
+ * (file://, some embedded webviews), so every path is handled and a
+ * useful toast is shown on failure.
  */
 async function copyOcrText(page) {
   if (!page.ocrText) {
@@ -860,24 +917,38 @@ async function copyOcrText(page) {
     return;
   }
 
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+  let copied = false;
+
+  // Preferred path: the async Clipboard API.
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    try {
       await navigator.clipboard.writeText(page.ocrText);
-      showToast("Text copied.");
-    } else {
-      // Fallback for older browsers
-      const textarea = document.getElementById("ocrTextArea");
-      if (textarea) {
+      copied = true;
+    } catch (error) {
+      console.warn("Clipboard API copy failed, trying fallback:", error);
+    }
+  }
+
+  // Fallback: select a hidden textarea and use execCommand.
+  if (!copied) {
+    const textarea = document.getElementById("ocrTextArea");
+    if (textarea) {
+      try {
+        textarea.value = page.ocrText;
         textarea.select();
-        document.execCommand("copy");
-        showToast("Text copied.");
-      } else {
-        throw new Error("Clipboard not available.");
+        if (document.execCommand("copy")) {
+          copied = true;
+        }
+      } catch (error) {
+        console.warn("execCommand copy failed:", error);
       }
     }
-  } catch (error) {
-    console.error("Copy failed:", error);
-    showToast("Failed to copy text.");
+  }
+
+  if (copied) {
+    showToast("Text copied.");
+  } else {
+    showToast("Could not copy to clipboard. Select the text manually.");
   }
 }
 
@@ -1043,7 +1114,6 @@ function startScanner() {
   app.editingPageId = null;
 
   app.activeDocumentId = null;
-  app.scannerActive = true;
 
   navigate("scanner");
 }
@@ -1055,7 +1125,6 @@ function startScannerForDocument(documentId) {
   app.editingPageId = null;
 
   app.activeDocumentId = documentId;
-  app.scannerActive = true;
 
   navigate("scanner");
 }
@@ -1069,7 +1138,6 @@ function clearScannerSession() {
   app.cropDraft = null;
   app.cropMode = false;
   app.editingPageId = null;
-  app.scannerActive = false;
 }
 
 function addAnotherPage() {
@@ -1086,9 +1154,6 @@ function addAnotherPage() {
    ========================================================= */
 
 function navigate(route, options = {}) {
-  if (options.from) {
-    app.previousRoute = options.from;
-  }
 
   app.route = route;
 
@@ -1493,7 +1558,7 @@ function renderFolders() {
            </div>`
         : `
           <div class="empty-state">
-            <div class="empty-icon">□</div>
+            <div class="empty-icon">▦</div>
             <h2>No folders</h2>
             <p>Create your first folder to organize documents.</p>
           </div>
@@ -1638,6 +1703,13 @@ function wireScannerPreviewActions() {
   if (!preview) {
     return;
   }
+
+  // Make the interactive affordance obvious: a hint label so the
+  // user knows the preview is tappable, not just an image.
+  const hint = document.createElement("div");
+  hint.className = "scanner-preview-hint";
+  hint.textContent = "Tap to accept · swipe up to retake";
+  preview.appendChild(hint);
 
   const accept = document.createElement("button");
   accept.className = "primary-btn";
@@ -1800,7 +1872,6 @@ function finishScanSession() {
   }
 
   // Scanner session is finished.
-  app.scannerActive = false;
   app.scannerPages = [];
   app.pendingImage = null;
   app.editingPageId = null;
