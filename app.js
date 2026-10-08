@@ -160,18 +160,6 @@ async function restoreImagesFromStorage(obj) {
 }
 
 /*
- * Convert a Blob to a data URL for UI rendering.
- */
-async function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/*
  * Generate a unique key for an image.
  */
 function imageKey() {
@@ -347,31 +335,28 @@ async function gcImages() {
 }
 
 /*
-function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-
-    if (!saved) {
-      return structuredClone(defaultState);
-    }
-
-    return {
-      ...structuredClone(defaultState),
-      ...JSON.parse(saved)
-    };
-  } catch (error) {
-    console.error("Could not load SmartScan data:", error);
-    return structuredClone(defaultState);
-  }
-}
-*/
-
-/*
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-*/
-
+ * function loadState() {
+ *   try {
+ *     const saved = localStorage.getItem(STORAGE_KEY);
+ *
+ *     if (!saved) {
+ *       return structuredClone(defaultState);
+ *     }
+ *
+ *     return {
+ *       ...structuredClone(defaultState),
+ *       ...JSON.parse(saved)
+ *     };
+ *   } catch (error) {
+ *     console.error("Could not load SmartScan data:", error);
+ *     return structuredClone(defaultState);
+ *   }
+ * }
+ *
+ * function saveState() {
+ *   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+ * }
+ */
 
 /* =========================================================
    APP STATE
@@ -953,6 +938,17 @@ async function saveStateAsync() {
 
     localStorage.setItem(STORAGE_KEY, serialized);
 
+    // Re-keying images into IndexedDB can orphan blobs that are no
+    // longer referenced by the new state. Collect them so IndexedDB
+    // does not grow by a full copy of every image on every save.
+    try {
+      await gcImages();
+    } catch (error) {
+      // Garbage collection is best-effort; a failure must not
+      // prevent the state itself from being persisted.
+      console.warn("Image garbage collection failed:", error);
+    }
+
     return true;
   } catch (error) {
     console.error("Failed to save SmartScan state:", error);
@@ -970,20 +966,6 @@ async function saveStateAsync() {
     }
 
     showToast(message);
-    return false;
-  }
-}
-
-/*
- * Verify localStorage contains only img_* keys, no data URLs.
- * Returns true if clean, false if data URLs found.
- */
-function verifyLocalStorageClean() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return true;
-    return !raw.includes("data:image/");
-  } catch {
     return false;
   }
 }
@@ -1060,44 +1042,6 @@ function startScannerForDocument(documentId) {
 }
 
 
-
-function startNewScannerSession() {
-  app.scannerPages = [];
-  app.pendingImage = null;
-  app.editingPageId = null;
-  app.scannerActive = true;
-
-  navigate("scanner");
-}
-
-
-function addScannerPage(imageData) {
-  if (!imageData) {
-    showToast("No image captured.");
-    return;
-  }
-
-  app.scannerPages.push({
-    id: createId(),
-
-    order: app.scannerPages.length,
-
-    originalImagePath: imageData,
-
-    processedImagePath: imageData,
-
-    filter: "original",
-
-    rotation: 0
-  });
-}
-
-
-function getScannerPageCount() {
-  return app.scannerPages.length;
-}
-
-
 function clearScannerSession() {
   app.scannerPages = [];
   app.pendingImage = null;
@@ -1109,33 +1053,6 @@ function clearScannerSession() {
   app.scannerActive = false;
 }
 
-function acceptCapturedPage(imageData) {
-  if (!imageData) {
-    showToast("No page to accept.");
-    return;
-  }
-
-  addScannerPage(imageData);
-
-  app.pendingImage = null;
-
-  renderScanner();
-
-  showToast(
-    `Page ${app.scannerPages.length} added`
-  );
-}
-
-
-function retakeCapturedPage() {
-  app.pendingImage = null;
-
-  renderScanner();
-
-  showToast("Ready to capture again.");
-}
-
-
 function addAnotherPage() {
   app.pendingImage = null;
 
@@ -1143,17 +1060,6 @@ function addAnotherPage() {
 
   showToast("Capture the next page.");
 }
-
-/*
-function finishScanning() {
-  if (app.scannerPages.length === 0) {
-    showToast("Capture at least one page first.");
-    return;
-  }
-
-  createDocumentFromScanner();
-}
-*/
 
 
 /* =========================================================
@@ -1167,8 +1073,12 @@ function navigate(route, options = {}) {
 
   app.route = route;
 
-  // Wait for initialization to complete before rendering
-  if (typeof appInitialization !== "undefined") {
+  // Render synchronously if initialization has already completed.
+  // Otherwise wait for the async initialization promise.
+  if (appInitializationComplete) {
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (typeof appInitialization !== "undefined") {
     appInitialization.then(() => {
       render();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1642,10 +1552,21 @@ function renderFolder() {
 
 
 function renderScanner() {
+  // A pending capture is shown in the scanner preview so the user
+  // can accept or retake it from this screen. If none is pending,
+  // show the empty capture frame instead.
+  const pendingSrc = app.pendingImage ? resolveImageSync(app.pendingImage) : "";
+
   main.innerHTML = `
     <section class="scanner">
 
-      <div class="scanner-preview"></div>
+      <div class="scanner-preview">
+        ${
+          pendingSrc
+            ? `<img src="${pendingSrc}" alt="Pending capture" />`
+            : ""
+        }
+      </div>
 
       <div class="scanner-controls">
 
@@ -1666,6 +1587,51 @@ function renderScanner() {
   document
     .getElementById("captureButton")
     ?.addEventListener("click", chooseImage);
+
+  if (app.pendingImage) {
+    wireScannerPreviewActions();
+  }
+}
+
+function wireScannerPreviewActions() {
+  // Allow accepting or retaking the pending capture from the
+  // scanner screen without going through the page editor first.
+  const preview = document.querySelector(".scanner-preview");
+  if (!preview) {
+    return;
+  }
+
+  const accept = document.createElement("button");
+  accept.className = "primary-btn";
+  accept.textContent = "Accept page";
+  accept.addEventListener("click", () => {
+    if (app.pendingImage) {
+      navigate("page-editor");
+    }
+  });
+
+  const retake = document.createElement("button");
+  retake.className = "secondary-btn";
+  retake.textContent = "Retake";
+  retake.addEventListener("click", () => {
+    app.pendingImage = null;
+    app.pendingCrop = null;
+    app.pendingFilter = null;
+    app.cropDraft = null;
+    app.cropMode = false;
+    app.editorImageSize = null;
+    renderScanner();
+    showToast("Ready to capture again.");
+  });
+
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "9px";
+  actions.style.marginTop = "14px";
+  actions.appendChild(accept);
+  actions.appendChild(retake);
+
+  document.querySelector(".scanner-controls")?.appendChild(actions);
 }
 
 
@@ -1881,73 +1847,12 @@ imageInput.addEventListener("change", async event => {
     // The natural size is relearned from the new capture.
     app.editorImageSize = null;
 
-    navigate("page-editor");
+navigate("page-editor");
   } catch (error) {
     console.error(error);
     showToast("Could not load that image.");
   }
 });
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const image = new Image();
-
-      image.onload = () => {
-        // Keep V0 lightweight.
-        // The real V1 storage layer will use proper file/blob storage.
-        const MAX_SIZE = 1400;
-
-        let width = image.naturalWidth;
-        let height = image.naturalHeight;
-
-        if (width > MAX_SIZE || height > MAX_SIZE) {
-          const scale = Math.min(
-            MAX_SIZE / width,
-            MAX_SIZE / height
-          );
-
-          width = Math.round(width * scale);
-          height = Math.round(height * scale);
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext("2d");
-
-        ctx.drawImage(
-          image,
-          0,
-          0,
-          width,
-          height
-        );
-
-        // JPEG dramatically reduces the amount of data
-        // compared with keeping the original PNG/photo.
-        const compressed = canvas.toDataURL(
-          "image/jpeg",
-          0.72
-        );
-
-        resolve(compressed);
-      };
-
-      image.onerror = reject;
-      image.src = reader.result;
-    };
-
-    reader.onerror = reject;
-
-    reader.readAsDataURL(file);
-  });
-}
-
-
 
 /* =========================================================
    PAGE EDITOR
@@ -2424,7 +2329,7 @@ function renderPageEditor() {
         <span>${!!crop ? "Crop ✓" : "Crop"}</span>
       </button>
 
-      <button class="tool-btn" id="ocrBtn">
+      <button class="tool-btn" id="ocrBtn" disabled title="OCR is available after the page is saved to a document.">
         <span>◰</span>
         <span>OCR</span>
       </button>
@@ -3202,14 +3107,6 @@ function handlePageAction(documentId, pageId, action) {
     return;
   }
 }
-
-/*
-function normalizePageOrder(document) {
-  document.pages.forEach((page, index) => {
-    page.order = index;
-  });
-}
-*/
 
 /* =========================================================
    DOCUMENT MENU
@@ -5276,6 +5173,16 @@ function renderSettings() {
           </div>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>Storage used</strong>
+            <small id="storageEstimateLabel">Checking…</small>
+          </div>
+          <button id="refreshStorageBtn" class="secondary-btn" style="min-height:38px;padding:0 12px;">
+            ↻
+          </button>
+        </div>
+
         <button
           id="clearDataBtn"
           class="danger-btn"
@@ -5291,7 +5198,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.0.0</h2>
+        <h2>SmartScan V1.2.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -5331,6 +5238,91 @@ function renderSettings() {
   document
     .getElementById("clearDataBtn")
     .addEventListener("click", clearAllData);
+
+  refreshStorageEstimate();
+  document
+    .getElementById("refreshStorageBtn")
+    ?.addEventListener("click", refreshStorageEstimate);
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "unknown";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+/*
+ * Surface the browser's storage estimate in Settings so the
+ * local-first story is concrete. Best-effort: failures fall back to
+ * a static message rather than breaking the settings screen.
+ */
+async function refreshStorageEstimate() {
+  const label = document.getElementById("storageEstimateLabel");
+  if (!label) {
+    return;
+  }
+
+  if (!navigator.storage?.estimate) {
+    label.textContent = "Storage estimate unavailable.";
+    return;
+  }
+
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    if (!quota) {
+      label.textContent = "Unlimited local storage.";
+      return;
+    }
+    label.textContent =
+      `${formatBytes(usage)} used of ${formatBytes(quota)}`;
+  } catch (error) {
+    console.warn("Could not read storage estimate:", error);
+    label.textContent = "Storage estimate unavailable.";
+  }
+}
+
+async function clearImageDb() {
+  if (!hasIndexedDB()) {
+    memoryImageStore.clear();
+    return;
+  }
+
+  try {
+    const db = await openImageDb();
+    if (!db) {
+      memoryImageStore.clear();
+      return;
+    }
+
+    if (!db.objectStoreNames.contains(IMAGE_STORE)) {
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(IMAGE_STORE, "readwrite");
+      tx.objectStore(IMAGE_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    // Drop the store so the database starts fresh; avoids stale
+    // version metadata if the schema ever changes.
+    db.close();
+    indexedDB.deleteDatabase(DB_NAME);
+  } catch (error) {
+    console.warn("Could not clear image storage:", error);
+  }
 }
 
 function clearAllData() {
@@ -5349,6 +5341,12 @@ function clearAllData() {
   app.activeDocumentId = null;
   app.scannerPages = [];
   app.pendingImage = null;
+
+  // Clear the image blob store too, otherwise "clear all data"
+  // leaves orphaned blobs behind in IndexedDB.
+  clearImageDb().catch(error => {
+    console.warn("Image storage cleanup failed:", error);
+  });
 
   saveState();
   applyTheme();
@@ -5411,7 +5409,9 @@ document.querySelectorAll(".nav-item").forEach(item => {
 
 window.addEventListener("storage", () => {
   state = loadState();
-  if (typeof appInitialization !== "undefined") {
+  if (appInitializationComplete) {
+    render();
+  } else if (typeof appInitialization !== "undefined") {
     appInitialization.then(() => render());
   } else {
     render();
@@ -5437,6 +5437,7 @@ window
 applyTheme();
 
 // Global initialization promise
+let appInitializationComplete = false;
 let appInitialization = (async () => {
   // Request persistent storage if supported
   if (navigator.storage?.persist) {
@@ -5467,7 +5468,19 @@ let appInitialization = (async () => {
     console.error("Legacy image migration failed:", err);
   });
 
+  // Register the service worker so the app shell is cached for
+  // offline use. This is best-effort and never blocks startup.
+  if ("serviceWorker" in navigator) {
+    try {
+      await navigator.serviceWorker.register("./sw.js");
+      console.log("SmartScan service worker registered.");
+    } catch (error) {
+      console.warn("SmartScan service worker registration failed:", error);
+    }
+  }
+
   render();
+  appInitializationComplete = true;
 })();
 // runZipSelfTest();
 

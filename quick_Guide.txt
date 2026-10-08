@@ -1,0 +1,61 @@
+SmartScan — Quick Guide
+
+SmartScan is a simple, local document scanner designed to keep your documents on your device.
+
+Scan
+
+Use the camera to scan a document.
+
+Add multiple pages to the same document.
+
+Import existing images when needed.
+
+Edit
+
+Open any page to edit it:
+
+Crop — remove unwanted areas.
+
+Rotate — correct the page orientation.
+
+Filters — improve the appearance of the scan.
+
+Changes are non-destructive, so you can reopen and edit the page again.
+
+OCR
+
+Select OCR on a page to recognize printed text.
+
+OCR runs locally on your device.
+
+Recognized text can be selected and copied.
+
+OCR results are saved with the page.
+
+After changing the page's crop, rotation, or filter, you can run OCR again to refresh the text.
+
+Export & Share
+
+Export your documents as:
+
+JPG
+
+PNG
+
+PDF
+
+ZIP for multi-page image collections
+
+You can also use your device's normal download/share options.
+
+Privacy
+
+SmartScan is designed to work locally.
+
+Your scanned documents and OCR text are processed and stored locally rather than being uploaded to a SmartScan server.
+
+Simple workflow
+
+Scan → Edit → OCR if needed → Export / Share
+
+That's it. SmartScan is intentionally kept small, local, and practical.

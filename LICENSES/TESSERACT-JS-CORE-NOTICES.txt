@@ -1,0 +1,13 @@
+Tesseract.js Core 5.0.0 — Third-Party Notice
+
+SmartScan uses Tesseract.js Core 5.0.0 as part of Tesseract.js 5.0.4 for optical character recognition (OCR).
+
+Tesseract.js Core is licensed under the Apache License, Version 2.0.
+
+Tesseract.js Core includes the Tesseract OCR engine and other third-party components, which remain subject to their respective licenses.
+
+The complete Apache License 2.0 text is included in: TESSERACT-JS-APACHE-2.0.txt
+
+Tesseract.js Core: https://github.com/naptha/tesseract.js-core
+
+Tesseract.js Core 5.0.0: https://github.com/naptha/tesseract.js-core/releases/tag/v5.0.0 

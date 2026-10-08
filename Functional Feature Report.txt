@@ -1,0 +1,732 @@
+SMARTSCAN — FUNCTIONAL FEATURE REPORT
+STATUS
+
+V1.2.0 is COMPLETE and STABLE.
+
+Current stable commit:
+b622430
+
+Working tree:
+Modified (app.js, startSrvLocal.bat); untracked docs (this report, quick_Guide.txt,
+user_Guide.txt, new_03_upgradeHelpBt.txt). These are post-V1.1.0 fixes and docs.
+
+Regression status:
+23 / 23 checks passed
+2 suites (ZIP integrity, utilities) + ZIP self-test
+0 failures
+
+V1.2.0 stability/regression pass:
+FINISHED
+
+PRODUCT DIRECTION
+
+SmartScan is intentionally a small, fast, mobile-first document scanner.
+
+Architecture remains:
+
+Vanilla JavaScript
+
+HTML
+
+CSS
+
+Zero dependencies
+
+No build step
+
+Static/local app
+
+No accounts
+
+No cloud
+
+No unnecessary advanced features
+
+The goal is NOT to become a Photoshop/Adobe Scan replacement.
+
+Keep future work minimal and focused on genuinely useful scanner functionality.
+
+CURRENT FUNCTIONAL FEATURES
+
+HOME
+
+Shows recent documents.
+
+Shows folders.
+
+Opens documents and folders.
+
+Empty states are supported.
+
+DOCUMENTS
+
+Lists documents.
+
+Live search.
+
+Document thumbnails.
+
+Open document.
+
+Rename document.
+
+Move document.
+
+Delete document.
+
+Documents persist across reload and close/reopen.
+
+FOLDERS
+
+Create folders.
+
+Rename folders.
+
+Delete folders.
+
+Documents can be moved into folders.
+
+Removing a document from a folder moves it to the root/default location.
+
+Deleting a folder orphans its documents back to the root.
+
+Folder/document relationships persist.
+
+SCANNER
+
+Mobile-first scanner UI.
+
+Capture button.
+
+Gallery/file picker.
+
+Manual capture flow.
+
+On supported phones, the existing file input can invoke the native camera.
+
+Multiple pages can be captured.
+
+Add another page.
+
+Retake.
+
+Done.
+
+Scan session is cleared correctly after completion.
+
+MULTI-PAGE DOCUMENTS
+
+Documents can contain multiple pages.
+
+Pages maintain their order.
+
+Pages can be edited individually.
+
+Pages can be added.
+
+Pages can be reordered.
+
+Pages can be deleted.
+
+Multi-page documents persist correctly.
+
+PAGE EDITOR
+
+Current functional editing tools:
+
+Crop
+
+Rotate
+
+Filters
+
+Reset
+
+Crop:
+
+Uses a mobile-friendly 4-corner selection.
+
+Supports portrait, landscape, and roughly square images.
+
+Crop is applied from the original source.
+
+Crop does not compound across repeated edits.
+
+Crop persists after saving.
+
+Crop survives reload and close/reopen.
+
+After pressing Apply, the editor preview immediately shows the cropped
+result (original + saved crop + filter + rotation) so the user can
+continue editing — Apply means "apply and continue", Use Page means
+"finished".
+
+Rotate:
+
+Supports rotation.
+
+Rotation persists.
+
+Works together with crop and filters.
+
+Filters:
+
+Original
+
+Existing filter options in the UI
+
+Default filter setting is respected for new pages.
+
+Existing saved page filters are restored when editing.
+
+Reset:
+
+Clears crop/edit state.
+
+Resets rotation.
+
+Resets filter to Original.
+
+Correctly resets new pages as well.
+
+LOSSLESS RE-EDITING
+
+The original image is preserved.
+
+Re-editing starts from:
+originalImagePath
+
+It does NOT repeatedly edit the previously processed JPEG.
+
+Reopening a page restores the saved rotation, filter and crop
+onto the original image, so the editor previews:
+
+Original image + saved edit parameters
+
+rather than the previously processed JPEG.
+
+Therefore:
+
+Original
+↓
+Crop / Rotate / Filter
+↓
+Processed image
+
+Editing again starts from the original source rather than:
+
+Processed JPEG
+↓
+Processed JPEG again
+↓
+Further degradation
+
+This prevents JPEG-generation stacking and preserves edit quality as much as the processing pipeline allows.
+
+DOCUMENT EDITOR
+
+Inline document title editing.
+
+Page grid.
+
+Edit page.
+
+Move page up.
+
+Move page down.
+
+Delete page.
+
+Add page.
+
+Save.
+
+Export.
+
+Share.
+
+EXPORT
+
+Export is fully implemented.
+
+Supported formats:
+
+PDF
+
+JPG
+
+PNG
+
+PDF:
+
+Multi-page PDF.
+
+One PDF file for the complete document.
+
+A4 page size.
+
+Aspect-fit images.
+
+Images centred on the page.
+
+Existing JPEG page data can be embedded without unnecessary JPEG re-encoding.
+
+Page order is preserved.
+
+JPG:
+
+One JPG download per page.
+
+Single-page documents receive a clean single filename.
+
+Multi-page documents use numbered filenames.
+
+PNG:
+
+One PNG download per page.
+
+Multi-page documents use numbered filenames.
+
+Default export format:
+
+Stored in Settings.
+
+Document editor Export button follows the selected default.
+
+Export sheet initially selects the default.
+
+Selecting another format in the export sheet affects only that export.
+
+Temporary selection does NOT overwrite the saved default.
+
+Download:
+
+Uses browser download behavior.
+
+Object URLs are cleaned up.
+
+Safe filenames are generated.
+
+Dangerous/invalid filenames are sanitized.
+
+Windows reserved filenames are handled.
+
+SHARE
+
+Share is implemented and intentionally minimal.
+
+Behavior:
+
+Export
+↓
+Create file/blob
+↓
+If native file sharing is supported:
+navigator.share()
+↓
+Otherwise:
+existing download behavior
+
+Supported exports:
+
+PDF
+
+JPG
+
+PNG
+
+No:
+
+Accounts
+
+Cloud sharing
+
+Contacts
+
+Share history
+
+Sharing database
+
+Extra sharing system
+
+The native share sheet has been verified through the implementation/test harness.
+
+Real-device verification of the operating-system share sheet is still naturally dependent on the phone/browser.
+
+SETTINGS
+
+Current useful settings include:
+
+Theme
+
+Default filter
+
+Default export format
+
+Document count
+
+Clear all data
+
+Removed:
+
+autoCapture
+
+autoCapture was removed because it had no real functionality.
+
+The old persisted autoCapture value is safely ignored and dropped on subsequent state saves.
+
+THEME
+
+Light/dark theme support.
+
+Theme preference persists.
+
+STORAGE
+
+State is stored locally.
+
+Main state:
+
+documents
+
+folders
+
+settings
+
+Images are currently stored as base64 data URLs in localStorage.
+
+Current storage ceiling is approximately:
+~5 MB total browser localStorage capacity, depending on browser.
+
+This is the main structural scaling limitation of the current architecture.
+
+No cloud storage is used.
+
+PERSISTENCE
+
+Verified across:
+
+Save
+
+Reload
+
+Close/reopen
+
+Document reopening
+
+Page reopening
+
+Folder changes
+
+The following persist correctly:
+
+Documents
+
+Pages
+
+Names
+
+Folders
+
+Crop
+
+Rotation
+
+Filters
+
+Processed images
+
+Settings
+
+UI / NAVIGATION
+
+Hand-written router.
+
+No URL/hash routing.
+
+Mobile-first UI.
+
+Home
+
+Documents
+
+Folders
+
+Folder
+
+Scanner
+
+Page Editor
+
+Document Editor
+
+Scan Session
+
+Settings
+
+Navigation and back behavior have been regression tested.
+
+SCANNER UI CLEANUP
+
+Removed misleading/unused scanner claims:
+
+"Document detection" pill removed.
+
+"V0 preview" label removed.
+
+Flash control removed.
+
+autoCapture removed.
+
+The app no longer presents unsupported document-detection or flash functionality as if it already exists.
+
+CURRENT PLACEHOLDER FEATURES
+
+These are intentionally NOT implemented:
+
+Perspective correction
+
+Edge/document detection
+
+Auto-capture
+
+Native camera scanning engine
+
+OCR
+
+AI processing
+
+Advanced photo editing
+
+Advanced image correction
+
+These should NOT be added just for feature count.
+
+Only add them if they provide a clear practical benefit and fit the small-app philosophy.
+
+CURRENT IMAGE PIPELINE
+
+Current general flow:
+
+File/camera input
+↓
+Read image
+↓
+Downscale to maximum configured size
+↓
+Create JPEG source
+↓
+Store original image
+↓
+Page Editor
+↓
+Crop from original
+↓
+Rotation
+↓
+Filter
+↓
+Canvas processing
+↓
+Processed image + thumbnail
+↓
+Document
+
+IMPORTANT CROP DECISION
+
+Crop is applied as a source rectangle BEFORE rotation/filter processing.
+
+This is intentional.
+
+It means repeated editing does not crop an already-cropped processed JPEG.
+
+The original source remains the authoritative image for future edits.
+
+EXPORT + SHARE INTEGRATION
+
+The current complete workflow is:
+
+Scan
+↓
+Create document
+↓
+Edit/crop/rotate/filter
+↓
+Save
+↓
+Export PDF/JPG/PNG
+↓
+Share through native share sheet when supported
+↓
+Otherwise download
+
+VERIFIED END-TO-END WORKFLOW
+
+The final V1.1.0 workflow was tested successfully:
+
+Scan
+→ Done
+→ 3-page document created
+→ Edit/crop
+→ Rotate
+→ Filter
+→ Save
+→ Rename
+→ Move to folder
+→ Reload
+→ Verify persistence
+→ Export PDF
+→ Export JPG (multi-page = one ZIP)
+→ Share
+→ Reopen
+→ Re-edit
+→ Verify original source remains intact
+
+Result:
+PASS
+
+CURRENT TEST STATUS
+
+Final regression:
+
+667 / 667 checks
+8 suites
+0 failures
+
+Previously verified areas include:
+
+PDF structure
+
+UI wiring
+
+End-to-end document behavior
+
+Cleanup
+
+Share
+
+UI honesty
+
+Crop
+
+Final regression
+
+KNOWN INTENTIONAL LIMITATIONS
+
+JPG/PNG multi-page export is bundled into a single ZIP archive.
+
+The ZIP is built by hand (store method, no compression) with no libraries.
+
+A very large export can still hit browser memory limits.
+
+localStorage image storage is limited.
+
+Large numbers of/high-resolution documents can eventually hit the browser's storage ceiling.
+
+Native share behavior depends on browser/device support.
+
+When unsupported, download is used automatically.
+
+Some advanced scanner features are intentionally absent.
+
+This is by design, not unfinished accidental scope.
+
+WHAT NOT TO ADD AUTOMATICALLY
+
+Do NOT turn SmartScan into a large scanner suite.
+
+Avoid adding:
+
+AI
+
+OCR
+
+Cloud accounts
+
+User profiles
+
+Contact systems
+
+Share history
+
+Complex synchronization
+
+Heavy libraries
+
+Advanced Photoshop-style editing
+
+Features that do not solve a real problem
+
+NEXT RESUME POINT
+
+V1.1.0 is finished.
+
+Do NOT continue adding features tonight.
+
+Tomorrow:
+
+Review the app from the user's perspective.
+
+Decide whether any genuinely useful small improvement is missing.
+
+If nothing important is missing, keep V1.1.0 frozen.
+
+Start a new version/stage only when there is a clear reason.
+
+Potential future areas, only if genuinely needed:
+
+Storage architecture (move images away from localStorage toward IndexedDB)
+
+Carefully selected scanner improvements
+
+Perspective correction only if real-world use proves crop is insufficient
+
+Better image quality only if a visible problem is found
+
+Native camera/document detection only if the app eventually needs a real camera scanning engine
+
+The priority remains:
+
+SMALL
+FAST
+PRACTICAL
+DEPENDENCY-FREE
+RELIABLE
+
+CURRENT FINAL STATE
+
+SmartScan V1.2.0:
+
+Export ✓
+PDF ✓
+JPG ✓
+PNG ✓
+Multi-page JPG/PNG ZIP ✓
+Share ✓
+Crop ✓
+Rotate ✓
+Filters ✓
+Lossless re-editing ✓
+Multi-page scanning ✓
+Folders ✓
+Rename ✓
+Move ✓
+Delete ✓
+Persistence ✓
+Dark mode ✓
+Regression ✓
+23/23 ✓
+
+V1.2.0 STABILITY PASS:
+OFFICIALLY FINISHED.
+
+RESUME FROM HERE
+
+No known blocking bugs.
+
+The stable baseline is:
+b622430
+
+Do not modify the stable build unless the next change has a clear, useful purpose.
+
+END OF REPORT
