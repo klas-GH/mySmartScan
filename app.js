@@ -1538,7 +1538,8 @@ function getFilteredDocuments() {
 }
 
 function documentCard(document) {
-  const thumbnail = documentThumbnail(document);
+  const thumbnailKey = documentThumbnail(document);
+  const thumbnailSrc = thumbnailKey ? resolveImageSync(thumbnailKey) : "";
 
   return `
     <div
@@ -1550,8 +1551,8 @@ function documentCard(document) {
     >
       <div class="document-thumb">
         ${
-          thumbnail
-            ? `<img src="${thumbnail}" alt="" />`
+          thumbnailSrc
+            ? `<img src="${thumbnailSrc}" alt="" />`
             : `<span>▧</span>`
         }
       </div>
