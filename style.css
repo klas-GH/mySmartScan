@@ -341,10 +341,16 @@ button:active {
   border-radius: 18px;
 
   transition: .15s ease;
+  cursor: pointer;
 }
 
 .document-card:hover {
   box-shadow: var(--shadow);
+}
+
+.document-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .document-thumb {

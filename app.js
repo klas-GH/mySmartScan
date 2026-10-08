@@ -174,6 +174,20 @@ function imageKey() {
 const IMAGE_CACHE_MAX_SIZE = 50;
 const imageDataUrlCache = new Map();
 
+/*
+ * Tiny inline SVG placeholder used when a real image is not yet in the
+ * synchronous cache. Keeps document cards and scanner previews from
+ * showing a broken-image icon while the async cache warms.
+ */
+const PLACEHOLDER_DATA_URL =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">` +
+    `<rect width="48" height="48" rx="8" fill="#2b2e3a"/>` +
+    `<path d="M14 32l6-8 5 6 4-5 5 7" fill="none" stroke="#8a8f9c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+    `</svg>`
+  );
+
 function cacheSet(key, value) {
   if (imageDataUrlCache.size >= IMAGE_CACHE_MAX_SIZE) {
     // Remove oldest entry (first inserted)
@@ -288,13 +302,14 @@ async function resolveImage(key) {
 
 /*
  * Synchronous resolve for rendering - uses cache only.
- * Returns data URL if in cache, otherwise the key itself (for test compatibility).
+ * Returns a data URL if in cache, otherwise a placeholder so the
+ * UI never shows a broken image while the async cache warms.
  */
 function resolveImageSync(key) {
-  if (!key) return "";
+  if (!key) return PLACEHOLDER_DATA_URL;
   if (typeof key === "string" && key.startsWith("data:")) return key;
   if (typeof key === "string" && key.startsWith("blob:")) return key;
-  return cacheGet(key) || key;
+  return cacheGet(key) || PLACEHOLDER_DATA_URL;
 }
 
 /*
@@ -311,6 +326,13 @@ async function removeImage(key) {
  */
 async function gcImages() {
   const db = await openImageDb();
+
+  // IndexedDB may be unavailable (private mode, test sandbox); in that
+  // case there is nothing to collect.
+  if (!db) {
+    return;
+  }
+
   const tx = db.transaction(IMAGE_STORE, "readonly");
   const allKeys = await new Promise((resolve, reject) => {
     const request = tx.objectStore(IMAGE_STORE).getAllKeys();
@@ -363,9 +385,6 @@ async function gcImages() {
    ========================================================= */
 
 const app = {
-  // Current screen
-  currentScreen: "home",
-
   // Currently opened SmartScan document
   activeDocumentId: null,
 
@@ -1380,7 +1399,13 @@ function documentCard(document) {
   const thumbnail = documentThumbnail(document);
 
   return `
-    <article class="document-card" data-document-id="${document.id}">
+    <div
+      class="document-card"
+      role="button"
+      tabindex="0"
+      data-document-id="${document.id}"
+      aria-label="Open ${escapeHtml(document.name)}"
+    >
       <div class="document-thumb">
         ${
           thumbnail
@@ -1400,24 +1425,35 @@ function documentCard(document) {
 
       <button
         class="card-menu"
+        type="button"
         data-action="menu"
         data-id="${document.id}"
         aria-label="Document actions"
+        onclick="event.stopPropagation()"
       >
         ⋮
       </button>
-    </article>
+    </button>
   `;
 }
 
 function attachDocumentCardEvents() {
   document.querySelectorAll(".document-card").forEach(card => {
+    const open = () => openDocument(card.dataset.documentId);
+
     card.addEventListener("click", event => {
       if (event.target.closest("[data-action='menu']")) {
         return;
       }
+      open();
+    });
 
-      openDocument(card.dataset.documentId);
+    // Make the card keyboard-activatable like a button.
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
     });
   });
 
@@ -1540,7 +1576,9 @@ function renderFolder() {
 
   document
     .getElementById("deleteFolderBtn")
-    ?.addEventListener("click", () => deleteFolder(folder.id));
+    ?.addEventListener("click", async () => {
+      await deleteFolder(folder.id);
+    });
 
   attachDocumentCardEvents();
 }
@@ -2601,7 +2639,7 @@ async function usePage() {
       sourceHeight
     );
 
-    const processedImage = canvas.toDataURL("image/jpeg", 0.78);
+    const processedImage = canvas.toDataURL("image/jpeg", 0.88);
 
     const processedKey = await storeImage(processedImage);
 
@@ -2974,19 +3012,19 @@ function attachPageEvents(doc) {
   window.document
     .querySelectorAll("[data-page-action]")
     .forEach(button => {
-      button.addEventListener("click", event => {
+      button.addEventListener("click", async event => {
         event.stopPropagation();
 
         const action = button.dataset.pageAction;
         const pageId = button.dataset.pageId;
 
-        handlePageAction(doc.id, pageId, action);
+        await handlePageAction(doc.id, pageId, action);
       });
     });
 }
 
 
-function handlePageAction(documentId, pageId, action) {
+async function handlePageAction(documentId, pageId, action) {
   const doc = getDocument(documentId);
 
   if (!doc) {
@@ -3034,7 +3072,15 @@ function handlePageAction(documentId, pageId, action) {
   // -----------------------------------------
 
   if (action === "delete") {
-    if (!confirm("Delete this page?")) {
+    const confirmed = await confirmAction(
+      "Delete this page?",
+      {
+        title: "Delete page",
+        detail: "This page will be removed from the document."
+      }
+    );
+
+    if (!confirmed) {
       return;
     }
 
@@ -3193,9 +3239,9 @@ function showDocumentMenu(documentId) {
 
   document
     .getElementById("modalDelete")
-    .addEventListener("click", () => {
+    .addEventListener("click", async () => {
       closeModal();
-      deleteDocument(documentId);
+      await deleteDocument(documentId);
     });
 
   document
@@ -3350,14 +3396,22 @@ function moveDocument(documentId) {
     });
 }
 
-function deleteDocument(documentId) {
+async function deleteDocument(documentId) {
   const doc = getDocument(documentId);
 
   if (!doc) {
     return;
   }
 
-  if (!confirm(`Delete "${doc.name}"?`)) {
+  const confirmed = await confirmAction(
+    `Delete "${doc.name}"?`,
+    {
+      title: "Delete document",
+      detail: "This document and all of its pages will be removed."
+    }
+  );
+
+  if (!confirmed) {
     return;
   }
 
@@ -4933,6 +4987,78 @@ document
 }
 
 /* =========================================================
+   CONFIRMATION MODAL
+   ========================================================= */
+
+/*
+ * Replace native confirm() dialogs with an in-app modal so
+ * destructive actions feel consistent with the rest of the UI.
+ *
+ * Resolves with true when the user confirms, false otherwise.
+ */
+function confirmAction(message, options = {}) {
+  return new Promise(resolve => {
+    const confirmText = options.confirmText || "Delete";
+    const cancelText = options.cancelText || "Cancel";
+    const danger = options.danger !== false;
+    const detail = options.detail || "";
+
+    modalRoot.innerHTML = `
+      <div class="modal-backdrop" id="confirmBackdrop">
+        <div class="modal">
+
+          <h2>${escapeHtml(options.title || "Confirm")}</h2>
+
+          <p>${escapeHtml(message)}</p>
+
+          ${
+            detail
+              ? `<small>${escapeHtml(detail)}</small>`
+              : ""
+          }
+
+          <div class="modal-actions">
+            <button id="confirmCancel" class="secondary-btn">
+              ${escapeHtml(cancelText)}
+            </button>
+
+            <button
+              id="confirmOk"
+              class="${danger ? "danger-btn" : "primary-btn"}"
+            >
+              ${escapeHtml(confirmText)}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    const backdrop = document.getElementById("confirmBackdrop");
+    const ok = document.getElementById("confirmOk");
+    const cancel = document.getElementById("confirmCancel");
+
+    const cleanup = result => {
+      backdrop.removeEventListener("click", onBackdrop);
+      resolve(result);
+    };
+
+    const onBackdrop = event => {
+      if (event.target.id === "confirmBackdrop") {
+        cleanup(false);
+      }
+    };
+
+    backdrop.addEventListener("click", onBackdrop);
+
+    cancel.addEventListener("click", () => cleanup(false));
+    ok.addEventListener("click", () => cleanup(true));
+
+    ok.focus();
+  });
+}
+
+/* =========================================================
    FOLDERS ACTIONS
    ========================================================= */
 
@@ -5048,14 +5174,22 @@ function renameFolder(folderId) {
     });
 }
 
-function deleteFolder(folderId) {
+async function deleteFolder(folderId) {
   const folder = getFolder(folderId);
 
   if (!folder) {
     return;
   }
 
-  if (!confirm(`Delete folder "${folder.name}"? Documents will not be deleted.`)) {
+  const confirmed = await confirmAction(
+    `Delete folder "${folder.name}"?`,
+    {
+      title: "Delete folder",
+      detail: "Documents in this folder will not be deleted."
+    }
+  );
+
+  if (!confirmed) {
     return;
   }
 
@@ -5317,17 +5451,24 @@ async function clearImageDb() {
     });
 
     // Drop the store so the database starts fresh; avoids stale
-    // version metadata if the schema ever changes.
+    // version metadata if the schema ever changes. Reset the cached
+    // handle so the next openImageDb() opens the new database.
     db.close();
+    imageDb = null;
     indexedDB.deleteDatabase(DB_NAME);
   } catch (error) {
     console.warn("Could not clear image storage:", error);
   }
 }
 
-function clearAllData() {
-  const confirmed = confirm(
-    "Clear all SmartScan documents, folders and settings?"
+async function clearAllData() {
+  const confirmed = await confirmAction(
+    "Clear all SmartScan documents, folders and settings?",
+    {
+      title: "Clear all data",
+      confirmText: "Clear everything",
+      detail: "This cannot be undone."
+    }
   );
 
   if (!confirmed) {
