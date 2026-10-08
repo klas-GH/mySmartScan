@@ -19,7 +19,8 @@ const defaultState = {
     theme: "system",
     defaultFilter: "original",
     defaultExportFormat: "pdf",
-    ocrLanguage: "eng"
+    ocrLanguage: "eng",
+    ocrPreprocess: "adaptive" // "adaptive" | "grayscale" | "none"
   }
 };
 
@@ -687,16 +688,21 @@ async function loadTesseract() {
 }
 
 /*
- * Preprocess image for OCR: resize to optimal DPI, grayscale, binarize.
+ * Preprocess image for OCR: resize, optional grayscale/binarize.
  * Mobile photos often have too high resolution, shadows, noise — this
  * normalizes them for Tesseract.
+ *
+ * Modes (state.settings.ocrPreprocess):
+ *   "adaptive"  -> resize + grayscale + global threshold binarization (default)
+ *   "grayscale" -> resize + grayscale only (no binarization)
+ *   "none"      -> resize only, pass through to Tesseract as-is
  */
-function preprocessForOcr(dataUrl) {
+async function preprocessForOcr(dataUrl, mode = "adaptive") {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       try {
-        // Target ~300 DPI equivalent: max dimension ~2000px
+        // Limit OCR image to a maximum dimension of 2000px
         const MAX_DIM = 2000;
         let { naturalWidth: w, naturalHeight: h } = img;
         const scale = Math.min(1, MAX_DIM / Math.max(w, h));
@@ -712,22 +718,35 @@ function preprocessForOcr(dataUrl) {
         // Draw original
         ctx.drawImage(img, 0, 0, w, h);
 
-        // Get pixel data for grayscale + threshold
+        if (mode === "none") {
+          // Resize only
+          resolve(canvas.toDataURL("image/png"));
+          return;
+        }
+
+        // Get pixel data for grayscale (+ optional threshold)
         const imageData = ctx.getImageData(0, 0, w, h);
         const data = imageData.data;
 
-        // Grayscale + Otsu-like adaptive threshold
-        // First pass: compute average luminance for simple global threshold
+        // Grayscale pass
         let sum = 0;
         for (let i = 0; i < data.length; i += 4) {
           const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
           data[i] = data[i + 1] = data[i + 2] = gray;
           sum += gray;
         }
-        const mean = sum / (w * h);
-        const threshold = Math.min(200, Math.max(50, mean + 30)); // bias toward white
 
-        // Second pass: binarize
+        if (mode === "grayscale") {
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+          return;
+        }
+
+        // mode === "adaptive": global threshold with bias toward white
+        const mean = sum / (w * h);
+        const threshold = Math.min(200, Math.max(50, mean + 30));
+
+        // Binarize pass
         for (let i = 0; i < data.length; i += 4) {
           const v = data[i] > threshold ? 255 : 0;
           data[i] = data[i + 1] = data[i + 2] = v;
@@ -896,8 +915,11 @@ async function openOcrModal(page) {
     // Generate current page appearance for OCR
     const imageDataUrl = await renderPageForOcr(page);
 
-    // Preprocess for OCR: resize, grayscale, binarize (critical for mobile photos)
-    const processedDataUrl = await preprocessForOcr(imageDataUrl);
+    // Preprocess for OCR: resize, grayscale, optional binarize (per setting)
+    const processedDataUrl = await preprocessForOcr(
+      imageDataUrl,
+      state.settings.ocrPreprocess
+    );
 
     // Run OCR
     const text = await recognizeText(processedDataUrl, ocrRun);
@@ -1108,7 +1130,8 @@ function loadState() {
           theme: "system",
           defaultFilter: "original",
           defaultExportFormat: "pdf",
-          ocrLanguage: "eng"
+          ocrLanguage: "eng",
+          ocrPreprocess: "adaptive"
         }
       };
     }
@@ -1130,7 +1153,8 @@ function loadState() {
           parsed.settings?.defaultFilter || "original",
         defaultExportFormat:
           parsed.settings?.defaultExportFormat || "pdf",
-        ocrLanguage: parsed.settings?.ocrLanguage || "eng"
+        ocrLanguage: parsed.settings?.ocrLanguage || "eng",
+        ocrPreprocess: parsed.settings?.ocrPreprocess || "adaptive"
       }
     };
 
@@ -1144,7 +1168,8 @@ function loadState() {
         theme: "system",
         defaultFilter: "original",
         defaultExportFormat: "pdf",
-        ocrLanguage: "eng"
+        ocrLanguage: "eng",
+        ocrPreprocess: "adaptive"
       }
     };
   }
@@ -1462,7 +1487,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.4.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.5.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5582,6 +5607,25 @@ function renderSettings() {
           </select>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>OCR preprocessing</strong>
+            <small>Image preparation before recognition.</small>
+          </div>
+
+          <select id="ocrPreprocessSetting">
+            <option value="adaptive" ${state.settings.ocrPreprocess === "adaptive" ? "selected" : ""}>
+              Adaptive (resize + grayscale + binarize)
+            </option>
+            <option value="grayscale" ${state.settings.ocrPreprocess === "grayscale" ? "selected" : ""}>
+              Grayscale only (resize + grayscale)
+            </option>
+            <option value="none" ${state.settings.ocrPreprocess === "none" ? "selected" : ""}>
+              None (resize only)
+            </option>
+          </select>
+        </div>
+
       </div>
 
     </section>
@@ -5626,7 +5670,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.4.0</h2>
+        <h2>SmartScan V1.5.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -5643,6 +5687,9 @@ function renderSettings() {
 
   document.getElementById("ocrLangSetting").value =
     state.settings.ocrLanguage;
+
+  document.getElementById("ocrPreprocessSetting").value =
+    state.settings.ocrPreprocess;
 
   document
     .getElementById("themeSetting")
@@ -5676,6 +5723,13 @@ function renderSettings() {
         tesseractWorker.terminate();
         tesseractWorker = null;
       }
+    });
+
+  document
+    .getElementById("ocrPreprocessSetting")
+    .addEventListener("change", event => {
+      state.settings.ocrPreprocess = event.target.value;
+      saveState();
     });
 
   document
