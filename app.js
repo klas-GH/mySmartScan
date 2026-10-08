@@ -177,6 +177,11 @@ const IMAGE_CACHE_MIN_SIZE = 20;
 const IMAGE_CACHE_MAX_SIZE = 120;
 const imageDataUrlCache = new Map();
 
+// Memoised cache limit. Recomputed only when the total page count
+// changes, so bulk image stores do not re-scan every document.
+let cachedPageCount = null;
+let cachedLimit = IMAGE_CACHE_MIN_SIZE;
+
 function imageCacheLimit() {
   let pages = 0;
   if (state && Array.isArray(state.documents)) {
@@ -184,10 +189,23 @@ function imageCacheLimit() {
       pages += Array.isArray(doc.pages) ? doc.pages.length : 0;
     }
   }
-  return Math.max(
-    IMAGE_CACHE_MIN_SIZE,
-    Math.min(IMAGE_CACHE_MAX_SIZE, pages + IMAGE_CACHE_MIN_SIZE)
-  );
+
+  if (pages !== cachedPageCount) {
+    cachedPageCount = pages;
+    cachedLimit = Math.max(
+      IMAGE_CACHE_MIN_SIZE,
+      Math.min(IMAGE_CACHE_MAX_SIZE, pages + IMAGE_CACHE_MIN_SIZE)
+    );
+  }
+
+  return cachedLimit;
+}
+
+// Reset the memo when state is replaced (load, cross-tab storage event,
+// clear all data) so the limit tracks the new document set.
+function resetImageCacheLimit() {
+  cachedPageCount = null;
+  cachedLimit = IMAGE_CACHE_MIN_SIZE;
 }
 
 /*
@@ -930,6 +948,9 @@ async function copyOcrText(page) {
   }
 
   // Fallback: select a hidden textarea and use execCommand.
+  // execCommand("copy") is deprecated but still supported by every
+  // current browser, so it stays as the last resort until the
+  // minimum supported browser drops it.
   if (!copied) {
     const textarea = document.getElementById("ocrTextArea");
     if (textarea) {
@@ -1323,8 +1344,8 @@ function renderHome() {
       <div class="hero-kicker">SMARTSCAN V1.2.0</div>
       <h2>Paper → clean document.</h2>
       <p>
-        Scan, clean and organize your documents locally.
-        Your files stay on this device.
+        Scan, clean and organize your documents locally — and pull
+        text out of any page with on-device OCR.
       </p>
     </section>
 
@@ -3382,7 +3403,14 @@ function renameDocument(documentId) {
   document
     .getElementById("confirmRename")
     .addEventListener("click", () => {
-      doc.name = input.value.trim() || "Untitled document";
+      const name = input.value.trim();
+
+      if (!name) {
+        showToast("Enter a document name.");
+        return;
+      }
+
+      doc.name = name;
       doc.updatedAt = now();
 
       saveState();
@@ -4984,7 +5012,7 @@ function showExportSheet(documentId) {
           `).join("")}
         </div>
 
-        <div class="modal-actions">
+<div class="modal-actions">
           <button id="cancelExport" class="secondary-btn">
             Cancel
           </button>
@@ -5006,6 +5034,17 @@ function showExportSheet(documentId) {
               : ""
           }
         </div>
+
+        ${
+          !shareSupported
+            ? `
+              <p class="modal-note">
+                Sharing is not available on this device, so files are
+                downloaded instead.
+              </p>
+            `
+            : ""
+        }
 
       </div>
     </div>
@@ -5559,6 +5598,10 @@ async function clearAllData() {
 
   state = structuredClone(defaultState);
 
+  // The cache limit is derived from page count, so reset it when the
+  // document set is replaced.
+  resetImageCacheLimit();
+
   app.activeDocumentId = null;
   app.scannerPages = [];
   app.pendingImage = null;
@@ -5637,6 +5680,10 @@ window.addEventListener("storage", async () => {
   await restoreImagesInState().catch(err => {
     console.error("Could not restore images after storage event:", err);
   });
+
+  // The cache limit is derived from page count, so reset it when the
+  // document set is replaced by a cross-tab change.
+  resetImageCacheLimit();
 
   if (appInitializationComplete) {
     render();
