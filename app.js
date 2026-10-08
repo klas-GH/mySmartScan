@@ -611,6 +611,10 @@ let tesseractWorker = null;
 let tesseractLoading = null;
 let ocrProgress = 0;
 
+// In-flight OCR recognition. Stored so the loading modal can cancel
+// a long run instead of forcing the user to wait for it to finish.
+let ocrRun = null;
+
 /*
  * Update the OCR loading modal's progress bar. Tesseract reports
  * progress through the worker logger; we surface it as a determinate
@@ -756,16 +760,49 @@ async function renderPageForOcr(page) {
 /*
  * Recognize text from an image data URL using Tesseract.js.
  * Returns the recognized plain text.
+ *
+ * A cancellation token is supported so the loading modal can abort a
+ * long run: set ocrRun.cancelled = true and the recognition is
+ * short-circuited, the worker is terminated, and a fresh one is
+ * created on the next run.
  */
-async function recognizeText(imageDataUrl) {
+async function recognizeText(imageDataUrl, token = {}) {
   const worker = await loadTesseract();
 
   try {
     const { data: { text } } = await worker.recognize(imageDataUrl);
+
+    if (token.cancelled) {
+      throw new Error("OCR cancelled.");
+    }
+
     return text.trim();
   } catch (error) {
+    if (token.cancelled) {
+      throw new Error("OCR cancelled.");
+    }
     console.error("OCR recognition failed:", error);
     throw new Error("Could not recognize text.");
+  }
+}
+
+function cancelOcrRun() {
+  if (ocrRun) {
+    ocrRun.cancelled = true;
+
+    // Terminate the worker so a long recognition stops early; a
+    // fresh one is created on the next run.
+    if (tesseractWorker) {
+      try {
+        tesseractWorker.terminate();
+      } catch (error) {
+        console.warn("Could not terminate Tesseract worker:", error);
+      }
+      tesseractWorker = null;
+    }
+
+    closeOcrModal();
+    showToast("OCR cancelled.");
   }
 }
 
@@ -789,12 +826,15 @@ async function openOcrModal(page) {
   // Show loading state
   showOcrLoadingModal(page);
 
+  // Track the in-flight run so the loading modal can cancel it.
+  ocrRun = { cancelled: false };
+
   try {
     // Generate current page appearance for OCR
     const imageDataUrl = await renderPageForOcr(page);
 
     // Run OCR
-    const text = await recognizeText(imageDataUrl);
+    const text = await recognizeText(imageDataUrl, ocrRun);
 
     if (!text) {
       throw new Error("No text was detected on this page.");
@@ -809,6 +849,8 @@ async function openOcrModal(page) {
     showOcrResultModal(page);
   } catch (error) {
     showOcrErrorModal(page, error.message);
+  } finally {
+    ocrRun = null;
   }
 }
 
@@ -832,6 +874,9 @@ function showOcrLoadingModal(page) {
             </div>
             <div id="ocrProgressLabel" style="font-size:12px;color:var(--text-secondary);margin-top:6px;">0%</div>
           </div>
+
+        <div class="modal-actions" style="margin-top:18px;">
+          <button id="ocrCancelBtn" class="secondary-btn" style="flex:1;">Cancel</button>
         </div>
       </div>
     </div>
@@ -840,6 +885,10 @@ function showOcrLoadingModal(page) {
   const modal = document.getElementById("ocrModal");
   modal?.addEventListener("click", e => {
     if (e.target === modal) closeOcrModal();
+  });
+
+  document.getElementById("ocrCancelBtn")?.addEventListener("click", () => {
+    cancelOcrRun();
   });
 }
 
@@ -1381,7 +1430,7 @@ function renderHome() {
              </div>`
           : `
             <div class="empty-state">
-              <div class="empty-icon">□</div>
+              <div class="empty-icon">▦</div>
               <h2>No folders yet</h2>
               <p>Create a folder when you're ready to organize your documents.</p>
             </div>
@@ -1648,7 +1697,7 @@ function renderFolder() {
            </div>`
         : `
           <div class="empty-state">
-            <div class="empty-icon">□</div>
+            <div class="empty-icon">▦</div>
             <h2>This folder is empty</h2>
             <p>Move a document here from its document menu.</p>
           </div>
@@ -1810,7 +1859,7 @@ function renderScanSession() {
       <div class="section" style="margin-top:20px;">
         <div class="empty-state">
 
-          <div class="empty-icon">✓</div>
+          <div class="empty-icon">▦</div>
 
           <h2>
             ${pageCount === 1
@@ -3015,7 +3064,11 @@ function renderDocumentEditor() {
   document
     .getElementById("documentTitle")
     ?.addEventListener("input", event => {
-      doc.name = event.target.value || "Untitled document";
+      // Live-save as the user types. Trim whitespace and fall back to
+      // "Untitled document" only when the field is genuinely empty,
+      // so a stray space never becomes the document's name.
+      const name = event.target.value.trim();
+      doc.name = name || "Untitled document";
       doc.updatedAt = now();
       saveState();
     });
@@ -5283,7 +5336,14 @@ function renameFolder(folderId) {
   document
     .getElementById("confirmFolderRename")
     .addEventListener("click", () => {
-      folder.name = input.value.trim() || "Untitled folder";
+      const name = input.value.trim();
+
+      if (!name) {
+        showToast("Enter a folder name.");
+        return;
+      }
+
+      folder.name = name;
 
       saveState();
       closeModal();
