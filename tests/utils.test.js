@@ -107,5 +107,25 @@ run("filterStyle falls back to none", () => {
   assertEqual(c.filterStyle(), "none", "undefined");
 });
 
+console.log("Image resolution");
+run("resolveImageSync returns a data URL placeholder on cache miss", () => {
+  const result = c.resolveImageSync("img_does_not_exist");
+  assert(typeof result === "string", "returns a string");
+  assert(result.startsWith("data:image/svg+xml;utf8,"), "placeholder is a data URL");
+  assert(result.length > 0, "placeholder is not empty");
+});
+run("resolveImageSync returns empty placeholder for falsy key", () => {
+  assertEqual(c.resolveImageSync(null), c.resolveImageSync(undefined), "null and undefined agree");
+  assert(c.resolveImageSync(null).startsWith("data:image/svg+xml;utf8,"), "null -> placeholder");
+});
+run("resolveImageSync passes through data: URLs", () => {
+  const dataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  assertEqual(c.resolveImageSync(dataUrl), dataUrl, "data: passthrough");
+});
+run("resolveImageSync passes through blob: URLs", () => {
+  const blobUrl = "blob:abc123";
+  assertEqual(c.resolveImageSync(blobUrl), blobUrl, "blob: passthrough");
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

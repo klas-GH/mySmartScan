@@ -5548,8 +5548,16 @@ document.querySelectorAll(".nav-item").forEach(item => {
   });
 });
 
-window.addEventListener("storage", () => {
+window.addEventListener("storage", async () => {
   state = loadState();
+
+  // localStorage only holds keys; the image blobs live in IndexedDB.
+  // Restore them before rendering, otherwise document cards in this
+  // tab would show broken images after a cross-tab change.
+  await restoreImagesInState().catch(err => {
+    console.error("Could not restore images after storage event:", err);
+  });
+
   if (appInitializationComplete) {
     render();
   } else if (typeof appInitialization !== "undefined") {
