@@ -5109,8 +5109,16 @@ function confirmAction(message, options = {}) {
     const ok = document.getElementById("confirmOk");
     const cancel = document.getElementById("confirmCancel");
 
+    const onKey = event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(false);
+      }
+    };
+
     const cleanup = result => {
       backdrop.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
       resolve(result);
     };
 
@@ -5121,6 +5129,7 @@ function confirmAction(message, options = {}) {
     };
 
     backdrop.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey, { once: true });
 
     cancel.addEventListener("click", () => cleanup(false));
     ok.addEventListener("click", () => cleanup(true));
