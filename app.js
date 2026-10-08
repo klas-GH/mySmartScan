@@ -20,7 +20,7 @@ const defaultState = {
     defaultFilter: "original",
     defaultExportFormat: "pdf",
     ocrLanguage: "eng",
-    ocrPreprocess: "adaptive",
+    ocrPreprocess: "none", // "adaptive" | "grayscale" | "none"
     ocrPsm: "auto" // "auto" | "single_block" | "single_line" | "word" | "raw_line"
   }
 };
@@ -1149,7 +1149,7 @@ function loadState() {
           defaultFilter: "original",
           defaultExportFormat: "pdf",
           ocrLanguage: "eng",
-          ocrPreprocess: "adaptive",
+          ocrPreprocess: "none",
           ocrPsm: "auto"
         }
       };
@@ -1173,7 +1173,7 @@ function loadState() {
         defaultExportFormat:
           parsed.settings?.defaultExportFormat || "pdf",
         ocrLanguage: parsed.settings?.ocrLanguage || "eng",
-        ocrPreprocess: parsed.settings?.ocrPreprocess || "adaptive",
+        ocrPreprocess: parsed.settings?.ocrPreprocess || "none",
         ocrPsm: parsed.settings?.ocrPsm || "auto"
       }
     };
@@ -1189,7 +1189,7 @@ function loadState() {
         defaultFilter: "original",
         defaultExportFormat: "pdf",
         ocrLanguage: "eng",
-        ocrPreprocess: "adaptive",
+        ocrPreprocess: "none",
         ocrPsm: "auto"
       }
     };
@@ -1508,7 +1508,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.8.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.9.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5730,7 +5730,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.8.0</h2>
+        <h2>SmartScan V1.9.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
