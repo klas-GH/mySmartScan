@@ -369,6 +369,10 @@ async function gcImages() {
     return;
   }
 
+  // NOTE: this iterates every key in the image store on every save, so
+  // it is O(total pages). Fine for typical libraries; revisit if a
+  // single user accumulates hundreds of pages, at which point a
+  // referenced-key index (or a per-save delta) would be better.
   const tx = db.transaction(IMAGE_STORE, "readonly");
   const allKeys = await new Promise((resolve, reject) => {
     const request = tx.objectStore(IMAGE_STORE).getAllKeys();
@@ -3064,11 +3068,17 @@ function renderDocumentEditor() {
   document
     .getElementById("documentTitle")
     ?.addEventListener("input", event => {
-      // Live-save as the user types. Trim whitespace and fall back to
-      // "Untitled document" only when the field is genuinely empty,
-      // so a stray space never becomes the document's name.
-      const name = event.target.value.trim();
-      doc.name = name || "Untitled document";
+// Live-save as the user types. Trim whitespace and fall back to
+  // "Untitled document" only when the field is genuinely empty, so a
+  // stray space never becomes the document's name.
+  //
+  // NOTE: this path cannot show a toast mid-keystroke, so it silently
+  // falls back to "Untitled document" rather than rejecting blank
+  // input. The rename modal (renameDocument / renameFolder) does
+  // reject blank names with a toast. The two paths are intentionally
+  // different: live-save must never block typing.
+  const name = event.target.value.trim();
+  doc.name = name || "Untitled document";
       doc.updatedAt = now();
       saveState();
     });

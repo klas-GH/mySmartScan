@@ -32,6 +32,20 @@ python -m http.server 8080
 
 Then visit `http://localhost:8080/`.
 
+## Browser support
+
+SmartScan runs in any modern browser with IndexedDB, a Clipboard API and
+Tesseract.js support. It also works from `file://`, but the native
+share sheet and some clipboard features are best on a real server.
+
+- **Copy text** uses the async Clipboard API first, then falls back to
+  `document.execCommand("copy")`. `execCommand` is deprecated but still
+  supported by every current browser, so it stays as the last resort.
+  Remove it when the minimum supported browser drops it.
+- **Share** probes `navigator.canShare` with a throwaway file and retries
+  with a single file if multi-file sharing is refused, then falls back
+  to a download.
+
 ## Version
 
 V1.2.0.
