@@ -19,6 +19,7 @@ const SHELL_FILES = [
   "./style.css",
   "./app.js",
   "./manifest.json",
+  "./favicon.png",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
 ];
