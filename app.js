@@ -5772,6 +5772,38 @@ window
     }
   });
 
+/*
+ * Global Escape handler.
+ *
+ * Only the confirmation modal wired its own Escape listener; every
+ * other modal (OCR, document menu, export sheet, folder rename)
+ * only closed on backdrop click. Pressing Escape anywhere else did
+ * nothing, which is inconsistent. A single document-level listener
+ * closes the topmost open backdrop, which is safe because
+ * closeModal() is a no-op when nothing is open.
+ */
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") {
+    return;
+  }
+
+  // Don't steal Escape from text inputs inside a modal — the user is
+  // likely editing and would lose their work if the modal closed.
+  const active = document.activeElement;
+  if (
+    active &&
+    (active.tagName === "INPUT" || active.tagName === "TEXTAREA")
+  ) {
+    return;
+  }
+
+  const openBackdrop = modalRoot?.querySelector(".modal-backdrop");
+  if (openBackdrop) {
+    event.preventDefault();
+    closeModal();
+  }
+});
+
 /* =========================================================
    INITIALIZE
    ========================================================= */

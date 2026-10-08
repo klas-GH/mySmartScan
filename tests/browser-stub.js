@@ -63,6 +63,19 @@ function makeStubElement() {
 
 function makeDocument() {
   const doc = {
+    _listeners: new Map(),
+    addEventListener(type, fn) {
+      const set = this._listeners.get(type) || [];
+      set.push(fn);
+      this._listeners.set(type, set);
+    },
+    removeEventListener(type, fn) {
+      const set = this._listeners.get(type);
+      if (!set) return;
+      for (let i = 0; i < set.length; i++) {
+        if (set[i] === fn) { set.splice(i, 1); return; }
+      }
+    },
     getElementById() { return makeStubElement(); },
     querySelector() { return null; },
     querySelectorAll() { return []; },
