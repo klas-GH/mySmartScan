@@ -2399,18 +2399,10 @@ function renderPageEditor() {
     return;
   }
 
-  // Resolve image key to data URL for display (synchronous, uses cache)
+  // Resolve the image for display. resolveImageSync always returns a
+  // data URL — either the cached image or a placeholder — so the
+  // editor never shows a broken image while the async cache warms.
   const imageSrc = resolveImageSync(app.pendingImage);
-
-  // If not in cache yet, trigger async resolution and re-render when done
-  if (!imageSrc) {
-    resolveImage(app.pendingImage).then(dataUrl => {
-      if (dataUrl && app.route === "page-editor") {
-        renderPageEditor();
-      }
-    });
-    // Show placeholder or wait for async resolution
-  }
 
   const edit = getEditState();
 
