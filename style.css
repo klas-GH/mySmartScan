@@ -816,6 +816,7 @@ button:active {
 
 .setting-info {
   flex: 1;
+  min-width: 0; /* prevents flex item overflow */
 }
 
 .setting-info strong {
@@ -834,8 +835,11 @@ select {
   background: var(--surface-2);
   color: var(--text);
   border-radius: 10px;
-  padding: 8px;
+  padding: 8px 12px;
   outline: none;
+  min-width: 0;
+  max-width: 100%; /* prevent overflow on mobile */
+  flex-shrink: 1;
 }
 
 /* ---------------------------------------------------------
@@ -1255,6 +1259,25 @@ body.dark .danger-btn {
   .search {
     padding: 11px 12px;
     border-radius: 12px;
+  }
+
+  .setting-row {
+    padding: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .setting-info strong {
+    font-size: 12px;
+  }
+
+  .setting-info small {
+    font-size: 10px;
+  }
+
+  select {
+    padding: 8px 10px;
+    font-size: 13px;
   }
 
   .document-card {

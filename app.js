@@ -1508,7 +1508,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.7.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.8.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -3354,9 +3354,17 @@ async function handlePageAction(documentId, pageId, action) {
 
     doc.pages.splice(index, 1);
 
-    normalizePageOrder(doc);
-
-    doc.updatedAt = now();
+    // If document has no pages left, delete the entire document
+    if (doc.pages.length === 0) {
+      state.documents = state.documents.filter(d => d.id !== doc.id);
+      if (app.activeDocumentId === doc.id) {
+        app.activeDocumentId = null;
+        navigate("home");
+      }
+    } else {
+      normalizePageOrder(doc);
+      doc.updatedAt = now();
+    }
 
     saveState();
     renderDocumentEditor();
@@ -5722,7 +5730,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.7.0</h2>
+        <h2>SmartScan V1.8.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
