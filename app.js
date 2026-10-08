@@ -18,7 +18,8 @@ const defaultState = {
   settings: {
     theme: "system",
     defaultFilter: "original",
-    defaultExportFormat: "pdf"
+    defaultExportFormat: "pdf",
+    ocrLanguage: "eng"
   }
 };
 
@@ -663,7 +664,7 @@ async function loadTesseract() {
   }
 
   try {
-    tesseractWorker = await window.Tesseract.createWorker("eng", 1, {
+    tesseractWorker = await window.Tesseract.createWorker(state.settings.ocrLanguage || "eng", 1, {
       logger: m => {
         // Surface recognition progress on the loading modal's bar
         // when one is open; otherwise fall back to a toast.
@@ -1045,7 +1046,8 @@ function loadState() {
         settings: {
           theme: "system",
           defaultFilter: "original",
-          defaultExportFormat: "pdf"
+          defaultExportFormat: "pdf",
+          ocrLanguage: "eng"
         }
       };
     }
@@ -1066,7 +1068,8 @@ function loadState() {
         defaultFilter:
           parsed.settings?.defaultFilter || "original",
         defaultExportFormat:
-          parsed.settings?.defaultExportFormat || "pdf"
+          parsed.settings?.defaultExportFormat || "pdf",
+        ocrLanguage: parsed.settings?.ocrLanguage || "eng"
       }
     };
 
@@ -1079,7 +1082,8 @@ function loadState() {
       settings: {
         theme: "system",
         defaultFilter: "original",
-        defaultExportFormat: "pdf"
+        defaultExportFormat: "pdf",
+        ocrLanguage: "eng"
       }
     };
   }
@@ -1397,7 +1401,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.2.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.3.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5474,6 +5478,49 @@ function renderSettings() {
           </select>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>OCR language</strong>
+            <small>Language used for text recognition.</small>
+          </div>
+
+          <select id="ocrLangSetting">
+            <option value="eng" ${state.settings.ocrLanguage === "eng" ? "selected" : ""}>
+              English
+            </option>
+            <option value="spa" ${state.settings.ocrLanguage === "spa" ? "selected" : ""}>
+              Spanish
+            </option>
+            <option value="fra" ${state.settings.ocrLanguage === "fra" ? "selected" : ""}>
+              French
+            </option>
+            <option value="deu" ${state.settings.ocrLanguage === "deu" ? "selected" : ""}>
+              German
+            </option>
+            <option value="ita" ${state.settings.ocrLanguage === "ita" ? "selected" : ""}>
+              Italian
+            </option>
+            <option value="por" ${state.settings.ocrLanguage === "por" ? "selected" : ""}>
+              Portuguese
+            </option>
+            <option value="chi_sim" ${state.settings.ocrLanguage === "chi_sim" ? "selected" : ""}>
+              Chinese (Simplified)
+            </option>
+            <option value="jpn" ${state.settings.ocrLanguage === "jpn" ? "selected" : ""}>
+              Japanese
+            </option>
+            <option value="kor" ${state.settings.ocrLanguage === "kor" ? "selected" : ""}>
+              Korean
+            </option>
+            <option value="rus" ${state.settings.ocrLanguage === "rus" ? "selected" : ""}>
+              Russian
+            </option>
+            <option value="ara" ${state.settings.ocrLanguage === "ara" ? "selected" : ""}>
+              Arabic
+            </option>
+          </select>
+        </div>
+
       </div>
 
     </section>
@@ -5518,7 +5565,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.2.0</h2>
+        <h2>SmartScan V1.3.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -5532,6 +5579,9 @@ function renderSettings() {
 
   document.getElementById("exportSetting").value =
     state.settings.defaultExportFormat;
+
+  document.getElementById("ocrLangSetting").value =
+    state.settings.ocrLanguage;
 
   document
     .getElementById("themeSetting")
@@ -5553,6 +5603,18 @@ function renderSettings() {
     .addEventListener("change", event => {
       state.settings.defaultExportFormat = event.target.value;
       saveState();
+    });
+
+  document
+    .getElementById("ocrLangSetting")
+    .addEventListener("change", event => {
+      state.settings.ocrLanguage = event.target.value;
+      saveState();
+      // Terminate cached worker so next OCR uses new language
+      if (tesseractWorker) {
+        tesseractWorker.terminate();
+        tesseractWorker = null;
+      }
     });
 
   document
