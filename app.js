@@ -687,6 +687,64 @@ async function loadTesseract() {
 }
 
 /*
+ * Preprocess image for OCR: resize to optimal DPI, grayscale, binarize.
+ * Mobile photos often have too high resolution, shadows, noise — this
+ * normalizes them for Tesseract.
+ */
+function preprocessForOcr(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        // Target ~300 DPI equivalent: max dimension ~2000px
+        const MAX_DIM = 2000;
+        let { naturalWidth: w, naturalHeight: h } = img;
+        const scale = Math.min(1, MAX_DIM / Math.max(w, h));
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) throw new Error("No canvas context");
+
+        // Draw original
+        ctx.drawImage(img, 0, 0, w, h);
+
+        // Get pixel data for grayscale + threshold
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const data = imageData.data;
+
+        // Grayscale + Otsu-like adaptive threshold
+        // First pass: compute average luminance for simple global threshold
+        let sum = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          data[i] = data[i + 1] = data[i + 2] = gray;
+          sum += gray;
+        }
+        const mean = sum / (w * h);
+        const threshold = Math.min(200, Math.max(50, mean + 30)); // bias toward white
+
+        // Second pass: binarize
+        for (let i = 0; i < data.length; i += 4) {
+          const v = data[i] > threshold ? 255 : 0;
+          data[i] = data[i + 1] = data[i + 2] = v;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error("Image load failed for OCR preprocessing"));
+    img.src = dataUrl;
+  });
+}
+
+/*
  * Render the current page appearance (original + crop + filter + rotation)
  * to a canvas and return a data URL for OCR processing.
  * Reuses the existing editing pipeline logic.
@@ -838,8 +896,11 @@ async function openOcrModal(page) {
     // Generate current page appearance for OCR
     const imageDataUrl = await renderPageForOcr(page);
 
+    // Preprocess for OCR: resize, grayscale, binarize (critical for mobile photos)
+    const processedDataUrl = await preprocessForOcr(imageDataUrl);
+
     // Run OCR
-    const text = await recognizeText(imageDataUrl, ocrRun);
+    const text = await recognizeText(processedDataUrl, ocrRun);
 
     if (!text) {
       throw new Error("No text was detected on this page.");
@@ -1401,7 +1462,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.3.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.4.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5565,7 +5626,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.3.0</h2>
+        <h2>SmartScan V1.4.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
