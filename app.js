@@ -1102,6 +1102,9 @@ async function saveStateAsync() {
 
     localStorage.setItem(STORAGE_KEY, serialized);
 
+    // Update global state so gcImages sees the new keys (not old data URLs)
+    state = stateForStorage;
+
     // Re-keying images into IndexedDB can orphan blobs that are no
     // longer referenced by the new state. Collect them so IndexedDB
     // does not grow by a full copy of every image on every save.
@@ -5213,6 +5216,7 @@ function confirmAction(message, options = {}) {
     const cleanup = result => {
       backdrop.removeEventListener("click", onBackdrop);
       document.removeEventListener("keydown", onKey);
+      modalRoot.innerHTML = "";
       resolve(result);
     };
 
