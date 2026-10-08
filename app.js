@@ -1572,7 +1572,7 @@ function documentCard(document) {
       >
         ⋮
       </button>
-    </button>
+    </div>
   `;
 }
 

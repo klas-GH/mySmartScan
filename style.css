@@ -1108,35 +1108,35 @@ select {
   position: fixed;
   z-index: 25;
 
-  right: max(18px, calc((100vw - 680px) / 2 + 18px));
-  bottom: calc(var(--nav-height) + 18px);
+  right: max(12px, calc((100vw - 680px) / 2 + 12px));
+  bottom: calc(var(--nav-height) + 12px);
 
-  min-height: 49px;
-  padding: 0 17px 0 11px;
+  min-height: 44px;
+  padding: 0 14px 0 10px;
 
-  border-radius: 18px;
+  border-radius: 16px;
 
   background: var(--primary);
   color: white;
 
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 
-  font-weight: 800;
-  font-size: 12px;
+  font-weight: 700;
+  font-size: 11px;
 
-  box-shadow: 0 10px 25px rgba(49,87,232,.3);
+  box-shadow: 0 8px 20px rgba(49,87,232,.28);
 }
 
 .scan-icon {
-  width: 29px;
-  height: 29px;
-  border-radius: 10px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
   background: rgba(255,255,255,.16);
   display: grid;
   place-items: center;
-  font-size: 20px;
+  font-size: 18px;
 }
 
 /* ---------------------------------------------------------
@@ -1198,5 +1198,73 @@ body.dark .danger-btn {
   .scanner {
     margin-left: -25px;
     margin-right: -25px;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --nav-height: 64px;
+  }
+
+  .scan-fab {
+    right: 12px;
+    bottom: calc(var(--nav-height) + 12px);
+    min-height: 40px;
+    padding: 0 12px 0 8px;
+    border-radius: 14px;
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .scan-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    font-size: 16px;
+  }
+
+  .bottom-nav {
+    height: var(--nav-height);
+  }
+
+  .nav-item span {
+    font-size: 18px;
+  }
+
+  .nav-item small {
+    font-size: 9px;
+  }
+
+  #app {
+    padding-bottom: calc(var(--nav-height) + 20px);
+  }
+
+  .main {
+    padding: 8px 12px 20px;
+  }
+
+  .topbar {
+    min-height: 64px;
+    padding: max(12px, env(safe-area-inset-top)) 12px 8px;
+  }
+
+  .page-heading h1 {
+    font-size: 24px;
+  }
+
+  .search {
+    padding: 11px 12px;
+    border-radius: 12px;
+  }
+
+  .document-card {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .document-thumb {
+    width: 44px;
+    height: 56px;
+    border-radius: 8px;
   }
 }
