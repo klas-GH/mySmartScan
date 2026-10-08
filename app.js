@@ -1508,7 +1508,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.6.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.7.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -1595,7 +1595,7 @@ function renderDocuments() {
   main.innerHTML = `
     <div class="page-heading">
       <h1>Documents</h1>
-      <p>${state.documents.length} document${state.documents.length === 1 ? "" : "s"}</p>
+      <p>${filtered.length} document${filtered.length === 1 ? "" : "s"}</p>
     </div>
 
     <input
@@ -1637,13 +1637,17 @@ function renderDocuments() {
 function getFilteredDocuments() {
   const query = app.searchQuery.trim().toLowerCase();
 
+  let docs = state.documents.filter(doc =>
+    Array.isArray(doc.pages) && doc.pages.length > 0
+  );
+
   if (!query) {
-    return [...state.documents].sort(
+    return [...docs].sort(
       (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
     );
   }
 
-  return state.documents.filter(document =>
+  return docs.filter(document =>
     document.name.toLowerCase().includes(query)
   );
 }
@@ -1764,7 +1768,8 @@ function renderFolders() {
 
 function folderCard(folder) {
   const count = state.documents.filter(
-    document => document.folderId === folder.id
+    document => document.folderId === folder.id &&
+                Array.isArray(document.pages) && document.pages.length > 0
   ).length;
 
   return `
@@ -1795,7 +1800,8 @@ function renderFolder() {
   }
 
   const documents = state.documents.filter(
-    document => document.folderId === folder.id
+    document => document.folderId === folder.id &&
+                Array.isArray(document.pages) && document.pages.length > 0
   );
 
   main.innerHTML = `
@@ -5716,7 +5722,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.6.0</h2>
+        <h2>SmartScan V1.7.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
