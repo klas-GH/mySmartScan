@@ -486,6 +486,7 @@ const scanFab = document.getElementById("scanFab");
 const backBtn = document.getElementById("backBtn");
 const settingsBtn = document.getElementById("settingsBtn");
 const imageInput = document.getElementById("imageInput");
+const importInput = document.getElementById("importInput");
 const modalRoot = document.getElementById("modalRoot");
 const screenSubtitle = document.getElementById("screenSubtitle");
 
@@ -1855,8 +1856,6 @@ function renderScanner() {
   // show the empty capture frame instead.
   const pendingSrc = app.pendingImage ? resolveImageSync(app.pendingImage) : "";
 
-  const showImportBtn = !!app.activeDocumentId;
-
   main.innerHTML = `
     <section class="scanner">
 
@@ -1872,18 +1871,14 @@ function renderScanner() {
 
         <div class="capture-row">
 
-          ${
-            showImportBtn
-              ? `<button
-                  class="scanner-control"
-                  id="importBtn"
-                  title="Import images from device"
-                  aria-label="Import images from device"
-                >
-                  ▧
-                </button>`
-              : ""
-          }
+          <button
+            class="scanner-control"
+            id="importBtn"
+            title="Import images from device"
+            aria-label="Import images from device"
+          >
+            ▧
+          </button>
 
           <button
             class="capture-button"
@@ -1901,11 +1896,9 @@ function renderScanner() {
     .getElementById("captureButton")
     ?.addEventListener("click", chooseImage);
 
-  if (showImportBtn) {
-    document
-      .getElementById("importBtn")
-      ?.addEventListener("click", importImagesToDocument);
-  }
+  document
+    .getElementById("importBtn")
+    ?.addEventListener("click", importImagesToDocument);
 
   if (app.pendingImage) {
     wireScannerPreviewActions();
@@ -2119,18 +2112,9 @@ function chooseImage() {
   imageInput.click();
 }
 
-/*
- * Import one or more images from the device gallery/files
- * and add them as pages to the current document.
- */
 function importImagesToDocument() {
-  if (!app.activeDocumentId) {
-    showToast("No document open to import into.");
-    return;
-  }
-  imageInput.value = "";
-  imageInput.multiple = true;
-  imageInput.click();
+  importInput.value = "";
+  importInput.click();
 }
 
 function finishScanning() {
@@ -2165,13 +2149,7 @@ imageInput.addEventListener("change", async event => {
     return;
   }
 
-  // Import mode: multiple files selected for existing document
-  if (imageInput.multiple && app.activeDocumentId) {
-    await importFilesToDocument(files);
-    return;
-  }
-
-  // Single file capture mode
+  // Single file capture mode (camera or single file select)
   const file = files[0];
 
   try {
@@ -2203,11 +2181,37 @@ imageInput.addEventListener("change", async event => {
   }
 });
 
-async function importFilesToDocument(files) {
-  const doc = getDocument(app.activeDocumentId);
-  if (!doc) {
-    showToast("Document not found.");
+importInput.addEventListener("change", async event => {
+  const files = Array.from(event.target.files || []);
+
+  if (files.length === 0) {
     return;
+  }
+
+  // Import mode: one or more files selected
+  await importFilesToDocument(files);
+});
+
+async function importFilesToDocument(files) {
+  // If there's an active document, add pages to it
+  const doc = app.activeDocumentId ? getDocument(app.activeDocumentId) : null;
+
+  // If no active document, create a new one
+  let targetDoc = doc;
+  let isNewDoc = false;
+
+  if (!targetDoc) {
+    const name = `Import ${new Date().toLocaleDateString()}`;
+    targetDoc = {
+      id: uid("doc"),
+      name,
+      folderId: null,
+      pages: [],
+      createdAt: now(),
+      updatedAt: now()
+    };
+    state.documents.unshift(targetDoc);
+    isNewDoc = true;
   }
 
   let added = 0;
@@ -2230,8 +2234,8 @@ async function importFilesToDocument(files) {
 
       const page = {
         id: uid("page"),
-        documentId: doc.id,
-        order: doc.pages.length,
+        documentId: targetDoc.id,
+        order: targetDoc.pages.length,
         originalImagePath: originalKey,
         processedImagePath: processedKey,
         thumbnailPath: processedKey,
@@ -2240,7 +2244,7 @@ async function importFilesToDocument(files) {
         crop: null
       };
 
-      doc.pages.push(page);
+      targetDoc.pages.push(page);
       added++;
     } catch (error) {
       console.error("Failed to import file:", file.name, error);
@@ -2248,10 +2252,17 @@ async function importFilesToDocument(files) {
   }
 
   if (added > 0) {
-    normalizePageOrder(doc);
-    doc.updatedAt = now();
+    normalizePageOrder(targetDoc);
+    targetDoc.updatedAt = now();
     saveState();
-    navigate("document-editor");
+
+    if (isNewDoc) {
+      app.activeDocumentId = targetDoc.id;
+      navigate("document-editor");
+    } else {
+      navigate("document-editor");
+    }
+
     showToast(`${added} image${added === 1 ? "" : "s"} imported.`);
   } else {
     showToast("No images were imported.");

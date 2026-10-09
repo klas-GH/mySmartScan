@@ -69,13 +69,22 @@
 
   </div>
 
-  <!-- Hidden image picker.
+  <!-- Hidden image picker for camera capture.
        In V0 this replaces the real native scanner. -->
   <input
     id="imageInput"
     type="file"
     accept="image/*"
     capture="environment"
+    hidden
+  />
+
+  <!-- Hidden image picker for imports (no camera capture). -->
+  <input
+    id="importInput"
+    type="file"
+    accept="image/*"
+    multiple
     hidden
   />
 
