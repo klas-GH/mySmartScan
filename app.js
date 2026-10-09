@@ -1148,10 +1148,10 @@ function closeOcrModal() {
  * Show help modal with quick guide.
  */
 function showHelpModal() {
-  const guide = `
-SmartScan — User Guide
+  const guide = `SmartScan — User Guide v1.10.3
 
 1. Scan a Document
+
 Open SmartScan.
 
 Scan a document with the camera or import an existing image.
@@ -1161,6 +1161,7 @@ Add more pages if the document has multiple pages.
 Reorder or remove pages as needed.
 
 2. Edit a Page
+
 Open a page to access the editing tools.
 
 Crop: Select the area you want to keep, then tap Apply. The cropped result remains visible in the editor.
@@ -1174,6 +1175,7 @@ Tap Use page when you are finished editing.
 You can reopen a page later and edit it again.
 
 3. OCR — Recognize Text
+
 Open a page and tap OCR.
 
 Wait while the text is recognized, then review the results.
@@ -1187,11 +1189,13 @@ Tap Close when finished.
 OCR runs locally on your device.
 
 4. Save and Reopen
+
 Your documents, page edits and OCR text are saved locally.
 
 You can leave a document and reopen it later.
 
 5. Export and Share
+
 Export your document in the format you need:
 
 • PDF: Convenient for documents and multi-page scans.
@@ -1203,9 +1207,11 @@ Multi-page JPG and PNG exports are automatically bundled into a ZIP file.
 After exporting, use the available download or sharing options.
 
 6. Privacy
+
 Documents and app data stay on this device. No account or cloud storage.
 
 7. Simple Workflow
+
 Scan → Edit → OCR if needed → Export or Share
 
 SmartScan is intentionally simple: scan what you need, make the corrections you need, and keep your documents under your control.
