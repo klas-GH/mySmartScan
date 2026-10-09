@@ -1,0 +1,16 @@
+# Local artifacts, not part of the project
+.gitignore
+app*.txt
+app_report.txt
+.kilo/
+startSrvLocal.bat
+make_icons.py
+__pycache__/
+tests/
+Functional Feature Report.txt
+startSrvLocal.bat
+new_03_upgradeHelpBt.txt
+user_Guide.txt
+
+# No dependencies, but never commit a stray install
+node_modules/
