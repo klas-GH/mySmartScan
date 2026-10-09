@@ -43,13 +43,10 @@ Then visit `http://localhost:8080/`.
 
 ## Browser support
 
-SmartScan runs in modern browsers with IndexedDB, Clipboard API and Tesseract.js support. Offline OCR availability depends on whether Tesseract.js and the required language data are cached. It also works from `file://`, but browser behavior varies (especially for IndexedDB and module loading); the native share sheet and some clipboard features are best on a real server.
+SmartScan works in modern browsers that support IndexedDB, the Clipboard API and Tesseract.js.
 
-- **Copy text** uses the async Clipboard API first, then falls back to
-  `document.execCommand("copy")`. `execCommand` is deprecated but retained as a legacy fallback supported by many browsers.
-- **Share** probes `navigator.canShare` with a temporary file and retries
-  with a single file if multi-file sharing is refused, then falls back
-  to a download.
+- **Copy text** uses the Clipboard API when available, with a fallback for older browsers.
+- **Share** uses the native share sheet when supported, otherwise it downloads the file.
 
 ## Version
 
