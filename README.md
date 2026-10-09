@@ -24,7 +24,9 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
 
 ## Architecture
 
-- Vanilla JavaScript, HTML and CSS. No build step, no dependencies.
+- Vanilla JavaScript, HTML and CSS. **No build step or package manager required.**
+- Uses **Tesseract.js** (loaded from CDN) for optical character recognition.
+- Relies on browser-native **IndexedDB** and **Clipboard API** for local storage and clipboard access.
 - State in `localStorage`; images in `IndexedDB` with an in-memory LRU cache.
 - Hand-rolled store-only ZIP writer and PDF generator.
 - Cross-tab sync via `storage` event.
