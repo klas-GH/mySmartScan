@@ -19,7 +19,7 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
 - Share through the native share sheet when supported, otherwise download.
 - Light / dark / system theme.
 - PWA: installable, **app shell works offline**; OCR requires cached Tesseract.js and language data.
-- All data stays on this device. No account, no cloud, no upload.
+- Documents and app data stay on this device. No account or cloud storage.
 - Documents with zero pages are automatically removed from views.
 
 ## Architecture
@@ -50,7 +50,7 @@ SmartScan works in modern browsers that support IndexedDB, the Clipboard API and
 
 ## Version
 
-V1.10.1.
+1.10.1.
 
 ## License
 
