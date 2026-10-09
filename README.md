@@ -50,7 +50,7 @@ SmartScan works in modern browsers that support IndexedDB, the Clipboard API and
 
 ## Version
 
-1.10.1.
+1.10.3.
 
 ## License
 
