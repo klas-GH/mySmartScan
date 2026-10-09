@@ -1508,7 +1508,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.9.0</div>
+      <div class="hero-kicker">SMARTSCAN V1.10.0</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -1855,6 +1855,8 @@ function renderScanner() {
   // show the empty capture frame instead.
   const pendingSrc = app.pendingImage ? resolveImageSync(app.pendingImage) : "";
 
+  const showImportBtn = !!app.activeDocumentId;
+
   main.innerHTML = `
     <section class="scanner">
 
@@ -1869,6 +1871,19 @@ function renderScanner() {
       <div class="scanner-controls">
 
         <div class="capture-row">
+
+          ${
+            showImportBtn
+              ? `<button
+                  class="scanner-control"
+                  id="importBtn"
+                  title="Import images from device"
+                  aria-label="Import images from device"
+                >
+                  ▧
+                </button>`
+              : ""
+          }
 
           <button
             class="capture-button"
@@ -1885,6 +1900,12 @@ function renderScanner() {
   document
     .getElementById("captureButton")
     ?.addEventListener("click", chooseImage);
+
+  if (showImportBtn) {
+    document
+      .getElementById("importBtn")
+      ?.addEventListener("click", importImagesToDocument);
+  }
 
   if (app.pendingImage) {
     wireScannerPreviewActions();
@@ -2094,6 +2115,21 @@ function chooseImage() {
     Later this function becomes the native camera entry point.
   */
   imageInput.value = "";
+  imageInput.multiple = false;
+  imageInput.click();
+}
+
+/*
+ * Import one or more images from the device gallery/files
+ * and add them as pages to the current document.
+ */
+function importImagesToDocument() {
+  if (!app.activeDocumentId) {
+    showToast("No document open to import into.");
+    return;
+  }
+  imageInput.value = "";
+  imageInput.multiple = true;
   imageInput.click();
 }
 
@@ -2123,11 +2159,20 @@ function finishScanning() {
 
 
 imageInput.addEventListener("change", async event => {
-  const file = event.target.files?.[0];
+  const files = Array.from(event.target.files || []);
 
-  if (!file) {
+  if (files.length === 0) {
     return;
   }
+
+  // Import mode: multiple files selected for existing document
+  if (imageInput.multiple && app.activeDocumentId) {
+    await importFilesToDocument(files);
+    return;
+  }
+
+  // Single file capture mode
+  const file = files[0];
 
   try {
     // Convert file to blob and store in IndexedDB
@@ -2151,12 +2196,67 @@ imageInput.addEventListener("change", async event => {
     // The natural size is relearned from the new capture.
     app.editorImageSize = null;
 
-navigate("page-editor");
+    navigate("page-editor");
   } catch (error) {
     console.error(error);
     showToast("Could not load that image.");
   }
 });
+
+async function importFilesToDocument(files) {
+  const doc = getDocument(app.activeDocumentId);
+  if (!doc) {
+    showToast("Document not found.");
+    return;
+  }
+
+  let added = 0;
+
+  for (const file of files) {
+    try {
+      const blob = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+
+      const originalKey = await storeImage(new Blob([blob], { type: file.type }));
+
+      // Create a basic processed version (same as original for imports)
+      const processedKey = await storeImage(
+        new Blob([blob], { type: file.type })
+      );
+
+      const page = {
+        id: uid("page"),
+        documentId: doc.id,
+        order: doc.pages.length,
+        originalImagePath: originalKey,
+        processedImagePath: processedKey,
+        thumbnailPath: processedKey,
+        rotation: 0,
+        filter: "original",
+        crop: null
+      };
+
+      doc.pages.push(page);
+      added++;
+    } catch (error) {
+      console.error("Failed to import file:", file.name, error);
+    }
+  }
+
+  if (added > 0) {
+    normalizePageOrder(doc);
+    doc.updatedAt = now();
+    saveState();
+    navigate("document-editor");
+    showToast(`${added} image${added === 1 ? "" : "s"} imported.`);
+  } else {
+    showToast("No images were imported.");
+  }
+}
 
 /* =========================================================
    PAGE EDITOR
@@ -5730,7 +5830,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.9.0</h2>
+        <h2>SmartScan V1.10.0</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
