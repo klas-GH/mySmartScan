@@ -484,7 +484,7 @@ const app = {
 const main = document.getElementById("main");
 const scanFab = document.getElementById("scanFab");
 const backBtn = document.getElementById("backBtn");
-const settingsBtn = document.getElementById("settingsBtn");
+const helpBtn = document.getElementById("helpBtn");
 const imageInput = document.getElementById("imageInput");
 const importInput = document.getElementById("importInput");
 const modalRoot = document.getElementById("modalRoot");
@@ -1136,6 +1136,90 @@ function closeOcrModal() {
   modalRoot.innerHTML = "";
 }
 
+/*
+ * Show help modal with quick guide.
+ */
+function showHelpModal() {
+  const guide = `
+SmartScan — User Guide
+
+1. Scan a Document
+Open SmartScan.
+
+Scan a document with the camera or import an existing image.
+
+Add more pages if the document has multiple pages.
+
+Reorder or remove pages as needed.
+
+2. Edit a Page
+Open a page to access the editing tools.
+
+Crop: Select the area you want to keep, then tap Apply. The cropped result remains visible in the editor.
+
+Rotate: Correct the page orientation.
+
+Filters: Adjust the page appearance.
+
+Tap Use page when you are finished editing.
+
+You can reopen a page later and edit it again.
+
+3. OCR — Recognize Text
+Open a page and tap OCR.
+
+Wait while the text is recognized, then review the results.
+
+Tap Copy text to copy the recognized text.
+
+Tap Run again to repeat OCR, for example after editing the page.
+
+Tap Close when finished.
+
+OCR runs locally on your device.
+
+4. Save and Reopen
+Your documents, page edits and OCR text are saved locally.
+
+You can leave a document and reopen it later.
+
+5. Export and Share
+Export your document in the format you need:
+
+• PDF: Convenient for documents and multi-page scans.
+• JPG: Image format.
+• PNG: Image format.
+
+Multi-page JPG and PNG exports are automatically bundled into a ZIP file.
+
+After exporting, use the available download or sharing options.
+
+6. Privacy
+Documents and app data stay on this device. No account or cloud storage.
+
+7. Simple Workflow
+Scan → Edit → OCR if needed → Export or Share
+
+SmartScan is intentionally simple: scan what you need, make the corrections you need, and keep your documents under your control.
+  `;
+
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="helpModal">
+      <div class="modal" style="max-width: 520px;">
+        <h2>Help / Quick Guide</h2>
+        <div style="max-height: 60vh; overflow-y: auto; padding: 8px 0;">
+          <pre style="white-space: pre-wrap; font-family: inherit; font-size: 13px; line-height: 1.6; margin: 0;">${escapeHtml(guide)}</pre>
+        </div>
+        <div class="modal-actions">
+          <button id="helpCloseBtn" class="primary-btn">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("helpCloseBtn")?.addEventListener("click", closeModal);
+}
+
 
 function loadState() {
   try {
@@ -1509,7 +1593,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.10.1</div>
+      <div class="hero-kicker">SMARTSCAN V1.10.2</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5841,7 +5925,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.10.1</h2>
+        <h2>SmartScan V1.10.2</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -6085,8 +6169,8 @@ scanFab.addEventListener("click", startScanner);
 
 backBtn.addEventListener("click", goBack);
 
-settingsBtn.addEventListener("click", () => {
-  navigate("settings");
+helpBtn.addEventListener("click", () => {
+  showHelpModal();
 });
 
 document.querySelectorAll(".nav-item").forEach(item => {
