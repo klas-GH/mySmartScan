@@ -5,28 +5,29 @@ SmartScan is a fast, local-first document scanner. All documents and data stay o
 SCAN
 • Tap the large circle to capture a page with the camera.
 • Tap the ▧ button (left of capture) to import existing images from your gallery/files — adds to the current document or creates a new one.
-• Add multiple pages; each appears in the scan session with "Add another" / "Done".
+• Add multiple pages; each appears in the scan session with "Add another page" / "Done".
 
 EDIT
 Open any page to edit:
-• Crop — drag corners to remove unwanted areas.
+• Crop — drag corners to select area, tap Apply to confirm.
 • Rotate — 90° increments.
 • Filters — Original, Grayscale, Black & White, Enhance.
+• Tap Use page to save and return.
 • Edits are non-destructive; original image is preserved, re-edit anytime.
 
 OCR
-• Tap OCR on any page to recognize text locally via Tesseract.js.
+• Open a page and tap OCR to recognize text locally via Tesseract.js.
 • 11 languages: English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Japanese, Korean, Russian, Arabic.
 • Settings → OCR language / Preprocessing (adaptive / grayscale / none) / Page segmentation (auto / single block / single line / word / raw line).
-• Recognized text saved with the page; copy to clipboard.
-• Re-run OCR after changing crop, rotation, or filter.
+• Recognized text saved with the page; tap Copy text to copy.
+• Re-run OCR after changing crop, rotation, or filter (Run again).
 
 ORGANIZE
 • Folders: create, rename, delete. Move documents via document menu (⋮).
 • Documents with zero pages are automatically removed from views.
 
 EXPORT & SHARE
-• Per document: PDF, JPG, PNG, or ZIP (multi-page images).
+• Per document: PDF, JPG, PNG. Multi-page JPG/PNG exports bundle into a ZIP automatically.
 • Settings → default export format.
 • Native share sheet when supported; otherwise downloads.
 
