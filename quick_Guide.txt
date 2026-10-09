@@ -1,61 +1,45 @@
 SmartScan — Quick Guide
 
-SmartScan is a simple, local document scanner designed to keep your documents on your device.
+SmartScan is a fast, local-first document scanner. All documents and data stay on your device.
 
-Scan
+SCAN
+• Tap the large circle to capture a page with the camera.
+• Tap the ▧ button (left of capture) to import existing images from your gallery/files — adds to the current document or creates a new one.
+• Add multiple pages; each appears in the scan session with "Add another" / "Done".
 
-Use the camera to scan a document.
-
-Add multiple pages to the same document.
-
-Import existing images when needed.
-
-Edit
-
-Open any page to edit it:
-
-Crop — remove unwanted areas.
-
-Rotate — correct the page orientation.
-
-Filters — improve the appearance of the scan.
-
-Changes are non-destructive, so you can reopen and edit the page again.
+EDIT
+Open any page to edit:
+• Crop — drag corners to remove unwanted areas.
+• Rotate — 90° increments.
+• Filters — Original, Grayscale, Black & White, Enhance.
+• Edits are non-destructive; original image is preserved, re-edit anytime.
 
 OCR
+• Tap OCR on any page to recognize text locally via Tesseract.js.
+• 11 languages: English, Spanish, French, German, Italian, Portuguese, Chinese (Simplified), Japanese, Korean, Russian, Arabic.
+• Settings → OCR language / Preprocessing (adaptive / grayscale / none) / Page segmentation (auto / single block / single line / word / raw line).
+• Recognized text saved with the page; copy to clipboard.
+• Re-run OCR after changing crop, rotation, or filter.
 
-Select OCR on a page to recognize printed text.
+ORGANIZE
+• Folders: create, rename, delete. Move documents via document menu (⋮).
+• Documents with zero pages are automatically removed from views.
 
-OCR runs locally on your device.
+EXPORT & SHARE
+• Per document: PDF, JPG, PNG, or ZIP (multi-page images).
+• Settings → default export format.
+• Native share sheet when supported; otherwise downloads.
 
-Recognized text can be selected and copied.
+SETTINGS
+• Theme: System / Light / Dark.
+• Default scan filter & export format.
+• OCR language, preprocessing, page segmentation.
 
-OCR results are saved with the page.
+PRIVACY
+• Documents and app data stay on this device. No account or cloud storage.
+• Tesseract.js loaded from CDN for OCR; app shell works offline.
 
-After changing the page's crop, rotation, or filter, you can run OCR again to refresh the text.
+WORKFLOW
+Scan / Import → Edit → OCR (optional) → Export / Share
 
-Export & Share
-
-Export your documents as:
-
-JPG
-
-PNG
-
-PDF
-
-ZIP for multi-page image collections
-
-You can also use your device's normal download/share options.
-
-Privacy
-
-SmartScan is designed to work locally.
-
-Your scanned documents and OCR text are processed and stored locally rather than being uploaded to a SmartScan server.
-
-Simple workflow
-
-Scan → Edit → OCR if needed → Export / Share
-
-That's it. SmartScan is intentionally kept small, local, and practical.
+SmartScan is intentionally small, local, and practical.
