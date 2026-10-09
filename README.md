@@ -5,22 +5,29 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
 
 ## Features
 
-- Scan multiple pages into one document.
+- Scan multiple pages into one document (camera or file import).
+- Import existing images from device gallery/files into new or existing documents.
 - Crop, rotate and apply filters (Original, Grayscale, Black & White, Enhance).
 - Lossless re-editing: the original image is preserved, so edits never compound.
-- OCR (English) on saved pages — runs locally via Tesseract.js.
+- OCR on saved pages — runs locally via Tesseract.js.
+  - 11 languages: English, Spanish, French, German, Italian, Portuguese,
+    Chinese (Simplified), Japanese, Korean, Russian, Arabic.
+  - Configurable preprocessing: adaptive (resize+grayscale+binarize), grayscale only, or none.
+  - Configurable page segmentation (PSM): auto, single block, single line, word, raw line.
 - Organize documents into folders.
 - Export as PDF, JPG or PNG. Multi-page JPG/PNG exports bundle into a ZIP.
 - Share through the native share sheet when supported, otherwise download.
 - Light / dark / system theme.
+- PWA: installable, works offline, caches app shell.
 - All data stays on this device. No account, no cloud, no upload.
+- Documents with zero pages are automatically removed from views.
 
 ## Architecture
 
-- Vanilla JavaScript, HTML and CSS.
-- Zero build step, zero runtime dependencies.
+- Vanilla JavaScript, HTML and CSS. No build step, no dependencies.
 - State in `localStorage`; images in `IndexedDB` with an in-memory LRU cache.
 - Hand-rolled store-only ZIP writer and PDF generator.
+- Cross-tab sync via `storage` event.
 
 ## Running locally
 
@@ -41,14 +48,13 @@ share sheet and some clipboard features are best on a real server.
 - **Copy text** uses the async Clipboard API first, then falls back to
   `document.execCommand("copy")`. `execCommand` is deprecated but still
   supported by every current browser, so it stays as the last resort.
-  Remove it when the minimum supported browser drops it.
 - **Share** probes `navigator.canShare` with a throwaway file and retries
   with a single file if multi-file sharing is refused, then falls back
   to a download.
 
 ## Version
 
-V1.2.0.
+V1.10.1.
 
 ## License
 
