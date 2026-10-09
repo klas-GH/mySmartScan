@@ -42,9 +42,10 @@ You can leave a document and reopen it later.
 5. Export and Share
 Export your document in the format you need:
 
-PDF: Convenient for documents and multi-page scans.
-JPG: Image format.
-PNG: Image format.
+• PDF: Convenient for documents and multi-page scans.
+• JPG: Image format.
+• PNG: Image format.
+
 Multi-page JPG and PNG exports are automatically bundled into a ZIP file.
 
 After exporting, use the available download or sharing options.
