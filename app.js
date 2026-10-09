@@ -585,7 +585,7 @@ function documentThumbnail(doc) {
 
 
 
-function showToast(message) {
+function showToast(message, duration = 2200, onClick = null) {
   const existing = document.querySelector(".toast");
 
   if (existing) {
@@ -596,11 +596,19 @@ function showToast(message) {
   toast.className = "toast";
   toast.textContent = message;
 
+  if (onClick) {
+    toast.style.cursor = "pointer";
+    toast.addEventListener("click", () => {
+      onClick();
+      toast.remove();
+    });
+  }
+
   document.body.appendChild(toast);
 
   setTimeout(() => {
     toast.remove();
-  }, 2200);
+  }, duration);
 }
 
 
@@ -1593,7 +1601,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.10.2</div>
+      <div class="hero-kicker">SMARTSCAN V1.10.3</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -5925,7 +5933,7 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.10.2</h2>
+        <h2>SmartScan V1.10.3</h2>
         <p>
           Local-first document scanning with multi-page capture,
           editing, PDF/JPG/PNG export, and native sharing.
@@ -6294,8 +6302,49 @@ let appInitialization = (async () => {
   // offline use. This is best-effort and never blocks startup.
   if ("serviceWorker" in navigator) {
     try {
-      await navigator.serviceWorker.register("./sw.js");
+      const registration = await navigator.serviceWorker.register("./sw.js");
       console.log("SmartScan service worker registered.");
+
+      // Check for updates periodically and when user returns to tab
+      let updateCheckInterval;
+
+      const checkForUpdate = () => {
+        registration.update().catch(err => console.warn("SW update check failed:", err));
+      };
+
+      // Check on startup
+      checkForUpdate();
+
+      // Check when user returns to tab
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+          checkForUpdate();
+        }
+      });
+
+      // Check periodically (every 6 hours)
+      updateCheckInterval = setInterval(checkForUpdate, 6 * 60 * 60 * 1000);
+
+      // Listen for SW updates
+      registration.addEventListener("updatefound", () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener("statechange", () => {
+          if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+            // New version available, prompt user to refresh
+            showToast("New version available — tap to refresh", 10000, () => {
+              window.location.reload();
+            });
+          }
+        });
+      });
+
+      // Handle controller change (new SW took over)
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        window.location.reload();
+      });
+
     } catch (error) {
       console.warn("SmartScan service worker registration failed:", error);
     }
