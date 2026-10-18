@@ -40,7 +40,7 @@ self.addEventListener("activate", event => {
       .then(keys =>
         Promise.all(
           keys
-            .filter(key => key !== CACHE_NAME)
+            .filter(key => key.startsWith("smartscan-shell-") && key !== CACHE_NAME)
             .map(key => caches.delete(key))
         )
       )
