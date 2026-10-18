@@ -9,6 +9,16 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="style.css" />
+  <style>
+    #installBanner[hidden] { display: none; }
+    #installBanner { position: fixed; z-index: 1000; left: 50%; bottom: calc(var(--nav-height) + max(12px, env(safe-area-inset-bottom))); transform: translateX(-50%); width: min(520px, calc(100% - 24px)); display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--primary); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); font: 14px system-ui, sans-serif; }
+    #installBanner p { margin: 4px 0 0; color: var(--muted); }
+    #installBanner .install-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+    #installBanner button { border: 0; border-radius: 9px; padding: 9px 12px; font: inherit; cursor: pointer; }
+    #installBanner #installBtn { background: var(--primary); color: white; font-weight: 700; }
+    #installBanner #installLater { background: var(--surface-2); color: var(--text); }
+    @media (max-width: 480px) { #installBanner { align-items: stretch; flex-direction: column; } #installBanner .install-actions button { flex: 1; } }
+  </style>
 </head>
 
 <body>
@@ -92,5 +102,50 @@
   <div id="modalRoot"></div>
 
   <script src="app.js"></script>
+  <aside id="installBanner" role="region" aria-label="Install SmartScan" hidden>
+    <div><strong>Install SmartScan</strong><p>Open your scanner quickly, even offline.</p></div>
+    <div class="install-actions">
+      <button id="installLater" type="button">Not now</button>
+      <button id="installBtn" type="button">Install</button>
+    </div>
+  </aside>
+  <script>
+    (() => {
+      const banner = document.getElementById("installBanner");
+      let deferredPrompt = null;
+      let dismissed = false;
+      try { dismissed = localStorage.getItem("mySmartScan.installBannerDismissed") === "1"; } catch {}
+      const standalone = () =>
+        window.matchMedia?.("(display-mode: standalone)").matches ||
+        navigator.standalone === true;
+      const hide = () => { banner.hidden = true; };
+      const show = () => { banner.hidden = dismissed || standalone(); };
+      const dismiss = () => {
+        dismissed = true;
+        hide();
+        try { localStorage.setItem("mySmartScan.installBannerDismissed", "1"); } catch {}
+      };
+
+      document.getElementById("installBtn").addEventListener("click", () => {
+        if (!deferredPrompt) return;
+        const prompt = deferredPrompt;
+        deferredPrompt = null;
+        Promise.resolve(prompt.prompt()).catch(error => console.error("PWA install prompt failed:", error));
+        prompt.userChoice?.catch(error => console.error("PWA install choice failed:", error));
+        hide();
+      });
+      document.getElementById("installLater").addEventListener("click", dismiss);
+      window.addEventListener("beforeinstallprompt", event => {
+        event.preventDefault();
+        deferredPrompt = event;
+        show();
+      });
+      window.addEventListener("appinstalled", () => {
+        deferredPrompt = null;
+        hide();
+      });
+      if (standalone()) hide();
+    })();
+  </script>
 </body>
 </html>
