@@ -1,49 +1,49 @@
-SmartScan — User Guide v1.10.5
+SmartScan — Quick Guide v1.10.5
+
+Complete loop: Scan → Edit → OCR (optional) → Organize → Export / Share
+Everything runs on this device. No account. No cloud.
+
 1. Scan a Document
 
-Open SmartScan.
-Scan a document with the camera or import an existing image.
-Add more pages if the document has multiple pages.
-Reorder or remove pages as needed.
+• Tap Scan document.
+• Use the live camera shutter, or import images from your device.
+• Add more pages, reorder, or remove them as needed.
 
 2. Edit a Page
 
-Open a page to access the editing tools.
-Crop: Select the area you want to keep, then tap Apply. The cropped result remains visible in the editor.
-Rotate: Correct the page orientation.
-Filters: Adjust the page appearance.
-Tap Use page when you are finished editing.
-You can reopen a page later and edit it again.
+• Open a page for crop, rotate, and filters (Original, Grayscale, B&W, Enhance).
+• Tap Use page when finished. Edits are lossless — the original is kept.
+• You can reopen a page later and edit it again.
 
 3. OCR — Recognize Text
 
-Open a page and tap OCR.
-Wait while the text is recognized, then review the results.
-Tap Copy text to copy the recognized text.
-Tap Run again to repeat OCR, for example after editing the page.
-Tap Close when finished.
-OCR runs locally on your device.
+• OCR is available on saved pages (from the document page list), not while still in the editor before Use page.
+• Tap OCR on a page, or OCR all pages on the document.
+• Review text, Copy text, or Run again after edits (editing a page clears old OCR).
+• Badges show which pages already have OCR.
+• Search Documents by name or OCR text — opening a hit jumps to the matched page.
+• First OCR run downloads the engine and language data (one-time); then it works offline for that language.
+• OCR runs locally on your device.
 
-4. Save and Reopen
+4. Organize
 
-Your documents, page edits and OCR text are saved locally.
-You can leave a document and reopen it later.
+• Create folders and move documents into them.
+• On Documents, use the checkboxes to select several and Move them in bulk.
 
-5. Export and Share
+5. Save and Reopen
 
-Export your document in the format you need:
-• PDF: Convenient for documents and multi-page scans.
-• JPG: Image format.
-• PNG: Image format.
+• Documents, edits, and OCR text stay on this device.
+• Leave and reopen anytime.
 
-Multi-page JPG and PNG exports are automatically bundled into a ZIP file.
-After exporting, use the available download or sharing options.
+6. Export and Share
 
-6. Privacy
+• PDF, JPG, or PNG. Multi-page JPG/PNG export as a ZIP.
+• Share via the system share sheet when available, otherwise download.
+• Very large documents may show a soft warning before export.
 
-Documents and app data stay on this device. No account or cloud storage.
+7. Privacy & install
 
-7. Simple Workflow
+• No account, no SmartScan server upload — data stays on this device.
+• Install as an app (PWA) for quick access; the app shell works offline.
 
-Scan → Edit → OCR if needed → Export or Share
-SmartScan is intentionally simple: scan what you need, make the corrections you need, and keep your documents under your control.
+SmartScan is intentionally simple: scan what you need, correct what you need, keep control of your documents.

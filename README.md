@@ -3,6 +3,14 @@
 SmartScan is a small, fast, mobile-first document scanner. It turns paper
 documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
 
+**Core loop:** Scan → Edit → OCR (optional) → Organize → Export / Share.  
+No account, no cloud — data stays on the device.
+
+**Good for:** phone use, privacy-first scanning, installable PWA, multi-page
+PDF/JPG/PNG, local OCR text copy.  
+**Not a goal (for now):** cloud sync, accounts, AI, edge detection / perspective
+correction, or a full desktop document suite.
+
 ## Features
 
 - Scan multiple pages into one document (live camera preview + shutter, or file import).
