@@ -334,6 +334,7 @@ button:active {
   display: flex;
   align-items: center;
   gap: 13px;
+  position: relative;
 
   padding: 12px;
   background: var(--surface);
@@ -772,6 +773,82 @@ button:active {
   border-radius: 8px;
   padding: 3px 7px;
   font-size: 10px;
+  z-index: 2;
+}
+
+.page-ocr-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border-radius: 8px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  z-index: 2;
+}
+
+.page-ocr-badge.has-ocr {
+  background: rgba(36, 138, 90, 0.9);
+  color: #fff;
+}
+
+.page-ocr-badge.no-ocr {
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.page-card-focus {
+  outline: 2px solid var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bulk-bar button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.document-card-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.doc-select {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.doc-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.document-card {
+  position: relative;
 }
 
 .page-image {

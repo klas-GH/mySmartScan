@@ -1,11 +1,11 @@
 /* =========================================================
-   SmartScan V1.10.4
+   SmartScan V1.10.5
    ---------------------------------------------------------
    Architecture intentionally keeps UI, state and storage
    separated so native capabilities can be added later.
    ========================================================= */
 
-const APP_VERSION = "1.10.4";
+const APP_VERSION = "1.10.5";
 
 /* Set to true only while debugging. Production builds stay quiet. */
 const DEBUG = false;
@@ -486,6 +486,13 @@ const app = {
   // Search
   searchQuery: "",
 
+  // After opening a search hit, optionally focus a matched page
+  focusPageId: null,
+  focusPageIndex: null,
+
+  // Multi-select on Documents list (for bulk move)
+  selectedDocumentIds: [],
+
   // UI
   modalOpen: false,
 
@@ -948,6 +955,78 @@ function cancelOcrRun() {
   }
 }
 
+/**
+ * Run OCR on every page of a document that does not yet have text.
+ * Soft-warns for large documents; shows progress via toasts.
+ */
+async function ocrAllPages(documentId) {
+  const doc = getDocument(documentId);
+  if (!doc || !Array.isArray(doc.pages) || doc.pages.length === 0) {
+    showToast("No pages to OCR.");
+    return;
+  }
+
+  const pending = doc.pages.filter(
+    page => !(typeof page.ocrText === "string" && page.ocrText.trim())
+  );
+
+  if (pending.length === 0) {
+    showToast("All pages already have OCR text.");
+    return;
+  }
+
+  const ok = await warnIfLargeDocument(doc, "OCR all pages");
+  if (!ok) {
+    return;
+  }
+
+  app.activeDocumentId = documentId;
+  let done = 0;
+  let failed = 0;
+
+  showToast(`OCR all: 0 / ${pending.length}…`);
+
+  for (const page of pending) {
+    try {
+      showOcrLoadingModal(page);
+      ocrRun = { cancelled: false };
+      const imageDataUrl = await renderPageForOcr(page);
+      const processedDataUrl = await preprocessForOcr(
+        imageDataUrl,
+        state.settings.ocrPreprocess
+      );
+      const text = await recognizeText(processedDataUrl, ocrRun);
+      if (!text) {
+        failed++;
+      } else {
+        page.ocrText = text;
+        done++;
+      }
+      doc.updatedAt = now();
+      saveState();
+    } catch (error) {
+      if (error?.message === "OCR cancelled.") {
+        showToast(`OCR all stopped — ${done} done, ${failed} failed.`);
+        ocrRun = null;
+        closeOcrModal();
+        renderDocumentEditor();
+        return;
+      }
+      failed++;
+      debugLog("Batch OCR page failed:", error);
+    } finally {
+      ocrRun = null;
+    }
+  }
+
+  closeOcrModal();
+  renderDocumentEditor();
+  showToast(
+    `OCR all finished — ${done} page${done === 1 ? "" : "s"}` +
+      (failed ? `, ${failed} failed` : "")
+  );
+}
+
 /*
  * Open the OCR modal for a page.
  * Shows existing OCR text if available, otherwise runs OCR.
@@ -965,11 +1044,8 @@ async function openOcrModal(page) {
     return;
   }
 
-  // Soft warning for very large documents (OCR is memory-heavy).
-  const ok = await warnIfLargeDocument(doc, "OCR");
-  if (!ok) {
-    return;
-  }
+  // Single-page OCR: no document-size warning (that is reserved for
+  // export and batch OCR).
 
   // Show loading state
   showOcrLoadingModal(page);
@@ -1733,6 +1809,7 @@ function emptyDocuments() {
 
 function renderDocuments() {
   const filtered = getFilteredDocuments();
+  const selectedCount = (app.selectedDocumentIds || []).length;
 
   main.innerHTML = `
     <div class="page-heading">
@@ -1747,6 +1824,16 @@ function renderDocuments() {
       placeholder="Search names or OCR text..."
       value="${escapeHtml(app.searchQuery)}"
     />
+
+    ${
+      selectedCount
+        ? `<div class="bulk-bar">
+             <span>${selectedCount} selected</span>
+             <button id="bulkMoveBtn" class="secondary-btn">Move</button>
+             <button id="bulkClearBtn" class="secondary-btn">Clear</button>
+           </div>`
+        : ""
+    }
 
     ${
       filtered.length
@@ -1773,6 +1860,14 @@ function renderDocuments() {
       input?.setSelectionRange(input.value.length, input.value.length);
     });
 
+  document.getElementById("bulkMoveBtn")?.addEventListener("click", () => {
+    moveDocuments([...(app.selectedDocumentIds || [])]);
+  });
+  document.getElementById("bulkClearBtn")?.addEventListener("click", () => {
+    app.selectedDocumentIds = [];
+    renderDocuments();
+  });
+
   attachDocumentCardEvents();
 }
 
@@ -1790,30 +1885,62 @@ function getFilteredDocuments() {
   }
 
   // Search document names and any stored OCR text (document-wide).
-  return docs.filter(document => {
-    if (document.name.toLowerCase().includes(query)) {
-      return true;
-    }
-    return (document.pages || []).some(
-      page =>
-        typeof page.ocrText === "string" &&
-        page.ocrText.toLowerCase().includes(query)
-    );
-  });
+  // Attach match metadata so opening a hit can jump to the page.
+  return docs
+    .map(document => {
+      const nameMatch = document.name.toLowerCase().includes(query);
+      let matchedPageId = null;
+      let matchedPageIndex = -1;
+      (document.pages || []).forEach((page, index) => {
+        if (
+          matchedPageId == null &&
+          typeof page.ocrText === "string" &&
+          page.ocrText.toLowerCase().includes(query)
+        ) {
+          matchedPageId = page.id;
+          matchedPageIndex = index;
+        }
+      });
+      if (!nameMatch && matchedPageId == null) {
+        return null;
+      }
+      return { document, nameMatch, matchedPageId, matchedPageIndex };
+    })
+    .filter(Boolean)
+    .map(entry => {
+      // Preserve match metadata on a non-enumerable side channel
+      // so documentCard / open still receive the document object.
+      entry.document.__searchMatch = {
+        pageId: entry.matchedPageId,
+        pageIndex: entry.matchedPageIndex,
+        nameMatch: entry.nameMatch
+      };
+      return entry.document;
+    });
 }
 
 function documentCard(document) {
   const thumbnailKey = documentThumbnail(document);
   const thumbnailSrc = thumbnailKey ? resolveImageSync(thumbnailKey) : "";
+  const selected = (app.selectedDocumentIds || []).includes(document.id);
 
   return `
     <div
-      class="document-card"
+      class="document-card ${selected ? "document-card-selected" : ""}"
       role="button"
       tabindex="0"
       data-document-id="${document.id}"
       aria-label="Open ${escapeHtml(document.name)}"
     >
+      <label class="doc-select" title="Select for bulk move">
+        <input
+          type="checkbox"
+          data-action="select"
+          data-id="${document.id}"
+          ${selected ? "checked" : ""}
+          onclick="event.stopPropagation()"
+        />
+      </label>
       <div class="document-thumb">
         ${
           thumbnailSrc
@@ -1828,6 +1955,11 @@ function documentCard(document) {
           ${documentPageCount(document)}
           page${documentPageCount(document) === 1 ? "" : "s"}
           · ${formatDate(document.updatedAt)}
+          ${
+            document.__searchMatch && document.__searchMatch.pageId
+              ? ` · OCR match p.${(document.__searchMatch.pageIndex || 0) + 1}`
+              : ""
+          }
         </div>
       </div>
 
@@ -1850,7 +1982,10 @@ function attachDocumentCardEvents() {
     const open = () => openDocument(card.dataset.documentId);
 
     card.addEventListener("click", event => {
-      if (event.target.closest("[data-action='menu']")) {
+      if (
+        event.target.closest("[data-action='menu']") ||
+        event.target.closest("[data-action='select']")
+      ) {
         return;
       }
       open();
@@ -1871,10 +2006,41 @@ function attachDocumentCardEvents() {
       showDocumentMenu(button.dataset.id);
     });
   });
+
+  document.querySelectorAll("[data-action='select']").forEach(box => {
+    box.addEventListener("change", event => {
+      event.stopPropagation();
+      const id = box.dataset.id;
+      const set = new Set(app.selectedDocumentIds || []);
+      if (box.checked) {
+        set.add(id);
+      } else {
+        set.delete(id);
+      }
+      app.selectedDocumentIds = [...set];
+      // Re-render only when on the documents list so the bulk bar updates.
+      if (app.route === "documents") {
+        renderDocuments();
+      }
+    });
+  });
 }
 
 function openDocument(id) {
   app.activeDocumentId = id;
+
+  // If this open came from search and OCR matched a page, remember it
+  // so the document editor can scroll to / highlight that page.
+  const doc = getDocument(id);
+  const match = doc && doc.__searchMatch;
+  if (match && match.pageId) {
+    app.focusPageId = match.pageId;
+    app.focusPageIndex = match.pageIndex;
+  } else {
+    app.focusPageId = null;
+    app.focusPageIndex = null;
+  }
+
   navigate("document-editor");
 }
 
@@ -2491,8 +2657,15 @@ async function importFilesToDocument(files) {
   }
 
   let added = 0;
+  let failed = 0;
+  const total = files.length;
 
-  for (const file of files) {
+  if (total > 1) {
+    showToast(`Importing 0 / ${total}…`);
+  }
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
     try {
       const blob = await new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -2523,14 +2696,26 @@ async function importFilesToDocument(files) {
       targetDoc.pages.push(page);
       added++;
     } catch (error) {
+      failed++;
       console.error("Failed to import file:", file.name, error);
+      if (error?.name === "QuotaExceededError") {
+        showToast("Storage is full — import stopped. Delete documents to free space.");
+        break;
+      }
+    }
+
+    if (total > 1 && (i + 1 === total || (i + 1) % 2 === 0)) {
+      showToast(`Importing ${i + 1} / ${total}…`);
     }
   }
 
   if (added > 0) {
     normalizePageOrder(targetDoc);
     targetDoc.updatedAt = now();
-    saveState();
+    const saved = await saveState();
+    if (saved === false) {
+      showToast("Import finished but saving failed — check storage.");
+    }
 
     if (isNewDoc) {
       app.activeDocumentId = targetDoc.id;
@@ -2539,9 +2724,17 @@ async function importFilesToDocument(files) {
       navigate("document-editor");
     }
 
-    showToast(`${added} image${added === 1 ? "" : "s"} imported.`);
+    showToast(
+      `${added} image${added === 1 ? "" : "s"} imported` +
+        (failed ? ` (${failed} failed)` : "") +
+        "."
+    );
   } else {
-    showToast("No images were imported.");
+    showToast(
+      failed
+        ? "No images imported — storage may be full or files unreadable."
+        : "No images were imported."
+    );
   }
 }
 
@@ -3103,11 +3296,8 @@ function renderPageEditor() {
     .getElementById("applyCropBtn")
     ?.addEventListener("click", applyCrop);
 
-  document
-    .getElementById("ocrBtn")
-    ?.addEventListener("click", () => {
-      openOcrModal();
-    });
+  // OCR is disabled in the page editor until the page is saved
+  // (see ocrBtn disabled attribute). Use OCR from the document page list.
 
   document
     .getElementById("resetBtn")
@@ -3307,6 +3497,8 @@ async function usePage() {
         existingPage.rotation = rotation;
         existingPage.filter = selectedFilter;
         existingPage.crop = crop;
+        // Image changed — previous OCR text is no longer valid.
+        existingPage.ocrText = null;
 
         doc.updatedAt = now();
 
@@ -3534,9 +3726,12 @@ function renderDocumentEditor() {
       aria-label="Document title"
     />
 
-    <div style="display:flex;gap:8px;margin-bottom:10px;">
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <button id="addPageBtn" class="secondary-btn">
         ＋ Add page
+      </button>
+      <button id="ocrAllBtn" class="secondary-btn" ${doc.pages.length ? "" : "disabled"}>
+        OCR all pages
       </button>
     </div>
 
@@ -3590,12 +3785,34 @@ document
     });
 
   document
+    .getElementById("ocrAllBtn")
+    ?.addEventListener("click", () => {
+      ocrAllPages(doc.id);
+    });
+
+  document
     .getElementById("exportBtn")
     ?.addEventListener("click", () => {
       showExportSheet(doc.id);
     });
 
   attachPageEvents(doc);
+
+  // Jump to page matched by search (OCR or open from search hit).
+  if (app.focusPageId) {
+    const target = main.querySelector(
+      `[data-page-id="${CSS.escape(app.focusPageId)}"]`
+    )?.closest(".page-card");
+    if (target) {
+      target.classList.add("page-card-focus");
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (app.focusPageIndex != null && app.focusPageIndex >= 0) {
+        showToast(`Matched page ${app.focusPageIndex + 1}`);
+      }
+    }
+    app.focusPageId = null;
+    app.focusPageIndex = null;
+  }
 }
 
 function pageCard(document, page, index) {
@@ -3605,6 +3822,7 @@ function pageCard(document, page, index) {
     "";
 
   const imageSrc = resolveImageSync(imageKey);
+  const hasOcr = typeof page.ocrText === "string" && page.ocrText.trim().length > 0;
 
   return `
     <article class="page-card">
@@ -3612,6 +3830,10 @@ function pageCard(document, page, index) {
       <span class="page-number">
         ${index + 1}
       </span>
+
+      <span class="page-ocr-badge ${hasOcr ? "has-ocr" : "no-ocr"}" title="${
+        hasOcr ? "OCR text available" : "No OCR text yet"
+      }">${hasOcr ? "OCR ✓" : "OCR"}</span>
 
       ${
         imageSrc
@@ -3655,7 +3877,7 @@ function pageCard(document, page, index) {
           data-page-action="ocr"
           data-page-id="${page.id}"
         >
-          OCR
+          ${hasOcr ? "Re-OCR" : "OCR"}
         </button>
 
       </div>
@@ -3739,6 +3961,8 @@ async function handlePageAction(documentId, pageId, action) {
       return;
     }
 
+    const removed = doc.pages[index];
+    const imageKeys = pageImageKeys(removed);
     doc.pages.splice(index, 1);
 
     // If document has no pages left, delete the entire document
@@ -3754,6 +3978,9 @@ async function handlePageAction(documentId, pageId, action) {
     }
 
     saveState();
+    // Drop orphaned blobs for the removed page (and GC any other orphans).
+    await removeImageKeys(imageKeys);
+    gcImages().catch(() => {});
     renderDocumentEditor();
 
     return;
@@ -3993,9 +4220,13 @@ function renameDocument(documentId) {
 }
 
 function moveDocument(documentId) {
-  const doc = getDocument(documentId);
+  moveDocuments([documentId]);
+}
 
-  if (!doc) {
+/** Move one or many documents into a folder (or out of folders). */
+function moveDocuments(documentIds) {
+  const ids = (documentIds || []).filter(id => getDocument(id));
+  if (!ids.length) {
     return;
   }
 
@@ -4004,11 +4235,14 @@ function moveDocument(documentId) {
     return;
   }
 
+  const multi = ids.length > 1;
+  const title = multi ? `Move ${ids.length} documents` : "Move document";
+
   modalRoot.innerHTML = `
     <div class="modal-backdrop">
       <div class="modal">
 
-        <h2>Move document</h2>
+        <h2>${escapeHtml(title)}</h2>
         <p>Select a folder.</p>
 
         <div class="settings-list">
@@ -4041,28 +4275,45 @@ function moveDocument(documentId) {
     .querySelectorAll("[data-move-folder]")
     .forEach(button => {
       button.addEventListener("click", () => {
-        doc.folderId = button.dataset.moveFolder;
-        doc.updatedAt = now();
+        const folderId = button.dataset.moveFolder;
+        ids.forEach(id => {
+          const d = getDocument(id);
+          if (d) {
+            d.folderId = folderId;
+            d.updatedAt = now();
+          }
+        });
 
         saveState();
         closeModal();
+        app.selectedDocumentIds = [];
         render();
 
-        showToast("Document moved.");
+        showToast(multi ? `${ids.length} documents moved.` : "Document moved.");
       });
     });
 
   document
     .getElementById("removeFolder")
     .addEventListener("click", () => {
-      doc.folderId = null;
-      doc.updatedAt = now();
+      ids.forEach(id => {
+        const d = getDocument(id);
+        if (d) {
+          d.folderId = null;
+          d.updatedAt = now();
+        }
+      });
 
       saveState();
       closeModal();
+      app.selectedDocumentIds = [];
       render();
 
-      showToast("Document removed from folder.");
+      showToast(
+        multi
+          ? `${ids.length} documents removed from folder.`
+          : "Document removed from folder."
+      );
     });
 }
 
@@ -4085,11 +4336,15 @@ async function deleteDocument(documentId) {
     return;
   }
 
+  const imageKeys = (doc.pages || []).flatMap(pageImageKeys);
+
   state.documents = state.documents.filter(
     item => item.id !== documentId
   );
 
   saveState();
+  await removeImageKeys(imageKeys);
+  gcImages().catch(() => {});
 
   if (app.activeDocumentId === documentId) {
     app.activeDocumentId = null;
@@ -4099,6 +4354,30 @@ async function deleteDocument(documentId) {
   }
 
   showToast("Document deleted.");
+}
+
+/** Collect IndexedDB image keys referenced by a page. */
+function pageImageKeys(page) {
+  if (!page) return [];
+  const keys = [];
+  for (const field of ["originalImagePath", "processedImagePath", "thumbnailPath"]) {
+    const key = page[field];
+    if (key && typeof key === "string" && !key.startsWith("data:")) {
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
+async function removeImageKeys(keys) {
+  const unique = [...new Set(keys.filter(Boolean))];
+  for (const key of unique) {
+    try {
+      await removeImage(key);
+    } catch (error) {
+      debugLog("Could not remove image", key, error);
+    }
+  }
 }
 
 /* =========================================================
@@ -6438,6 +6717,15 @@ window.addEventListener("pagehide", stopCameraStream);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     stopCameraStream();
+    return;
+  }
+  // Resume live preview when returning to the scanner (no pending capture).
+  if (
+    document.visibilityState === "visible" &&
+    app.route === "scanner" &&
+    !app.pendingImage
+  ) {
+    startLiveCamera().catch(() => {});
   }
 });
 

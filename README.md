@@ -14,8 +14,10 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
     Chinese (Simplified), Japanese, Korean, Russian, Arabic.
   - Configurable preprocessing: adaptive (resize+grayscale+binarize), grayscale only, or none.
   - Configurable page segmentation (PSM): auto, single block, single line, word, raw line.
-  - Document search includes OCR text once pages have been recognized.
-- Soft warnings before export/OCR on very large documents.
+  - Document search includes OCR text once pages have been recognized (opens matched page).
+  - Batch OCR all pages; per-page OCR badges.
+- Soft warnings before export (and batch OCR) on very large documents.
+- Bulk select + move documents into folders.
 - Organize documents into folders.
 - Export as PDF, JPG or PNG. Multi-page JPG/PNG exports bundle into a ZIP.
 - Share through the native share sheet when supported, otherwise download.
@@ -52,7 +54,7 @@ SmartScan works in modern browsers that support IndexedDB, the Clipboard API and
 
 ## Version
 
-1.10.4.
+1.10.5.
 
 ## License
 

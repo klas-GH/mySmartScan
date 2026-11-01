@@ -1,4 +1,4 @@
-SmartScan — User Guide v1.10.4
+SmartScan — User Guide v1.10.5
 1. Scan a Document
 
 Open SmartScan.
