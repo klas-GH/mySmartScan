@@ -1,11 +1,11 @@
 /* =========================================================
-   SmartScan V1.10.5
+   SmartScan V1.10.6
    ---------------------------------------------------------
    Architecture intentionally keeps UI, state and storage
    separated so native capabilities can be added later.
    ========================================================= */
 
-const APP_VERSION = "1.10.5";
+const APP_VERSION = "1.10.6";
 
 /* Set to true only while debugging. Production builds stay quiet. */
 const DEBUG = false;
