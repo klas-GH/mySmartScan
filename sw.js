@@ -6,12 +6,18 @@
  * cached here — it lives in localStorage/IndexedDB and is always
  * local-first.
  *
+ * OCR (Tesseract.js + language data) is loaded from CDN on first use.
+ * The browser HTTP cache usually keeps those assets after the first
+ * successful OCR run, so later offline OCR works for the selected
+ * language. Language packs are not precached here — they are large and
+ * the language is user-controlled.
+ *
  * Strategy:
  *   - install: cache the shell.
  *   - fetch: serve from cache, falling back to the network.
  */
 
-const CACHE_NAME = "smartscan-shell-v4";
+const CACHE_NAME = "smartscan-shell-v5";
 
 const SHELL_FILES = [
   "./",

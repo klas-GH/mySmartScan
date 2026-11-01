@@ -1,10 +1,24 @@
-/// part 1
 /* =========================================================
-   SmartScan V0
+   SmartScan V1.10.4
    ---------------------------------------------------------
    Architecture intentionally keeps UI, state and storage
    separated so native capabilities can be added later.
    ========================================================= */
+
+const APP_VERSION = "1.10.4";
+
+/* Set to true only while debugging. Production builds stay quiet. */
+const DEBUG = false;
+
+function debugLog(...args) {
+  if (DEBUG) {
+    console.log(...args);
+  }
+}
+
+/* Soft limits — warn, never hard-block. */
+const WARN_PAGE_COUNT = 15;
+const WARN_EXPORT_BYTES = 40 * 1024 * 1024; // ~40 MB estimated
 
 /* =========================================================
    STORAGE
@@ -462,6 +476,9 @@ const app = {
   // Scanner session
   scannerPages: [],
 
+  // Live camera stream (MediaStream) while on the scanner screen.
+  // Stopped when leaving the route or after a successful capture.
+  cameraStream: null,
 
   // Current folder
   activeFolderId: null,
@@ -528,6 +545,22 @@ function escapeHtml(value = "") {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+/**
+ * Tiny safe HTML helper for new UI fragments.
+ * Usage: safeHtml`<p>${userName}</p>` — values are escaped automatically.
+ * Static parts of the template are trusted; only interpolations are escaped.
+ */
+function safeHtml(strings, ...values) {
+  let out = "";
+  for (let i = 0; i < strings.length; i++) {
+    out += strings[i];
+    if (i < values.length) {
+      out += escapeHtml(values[i]);
+    }
+  }
+  return out;
 }
 
 function getDocument(documentId) {
@@ -932,6 +965,12 @@ async function openOcrModal(page) {
     return;
   }
 
+  // Soft warning for very large documents (OCR is memory-heavy).
+  const ok = await warnIfLargeDocument(doc, "OCR");
+  if (!ok) {
+    return;
+  }
+
   // Show loading state
   showOcrLoadingModal(page);
 
@@ -1148,7 +1187,7 @@ function closeOcrModal() {
  * Show help modal with quick guide.
  */
 function showHelpModal() {
-  const guide = `SmartScan — User Guide v1.10.3
+  const guide = `SmartScan — User Guide v${APP_VERSION}
 
 1. Scan a Document
 
@@ -1360,9 +1399,9 @@ async function migrateLegacyImages() {
   }
 
   try {
-    console.log("Migrating legacy images to IndexedDB...");
+    debugLog("Migrating legacy images to IndexedDB...");
     await saveStateAsync();
-    console.log("Migration complete.");
+    debugLog("Migration complete.");
     return true;
   } catch (error) {
     console.error("Migration failed:", error);
@@ -1441,6 +1480,10 @@ function addAnotherPage() {
    ========================================================= */
 
 function navigate(route, options = {}) {
+  // Release the camera as soon as we leave the scanner screen.
+  if (app.route === "scanner" && route !== "scanner") {
+    stopCameraStream();
+  }
 
   app.route = route;
 
@@ -1607,7 +1650,7 @@ function renderHome() {
 
   main.innerHTML = `
     <section class="hero">
-      <div class="hero-kicker">SMARTSCAN V1.10.3</div>
+      <div class="hero-kicker">SMARTSCAN V${APP_VERSION}</div>
       <h2>Paper → clean document.</h2>
       <p>
         Scan, clean and organize your documents locally — and pull
@@ -1701,7 +1744,7 @@ function renderDocuments() {
       id="documentSearch"
       class="search"
       type="search"
-      placeholder="Search documents..."
+      placeholder="Search names or OCR text..."
       value="${escapeHtml(app.searchQuery)}"
     />
 
@@ -1714,7 +1757,7 @@ function renderDocuments() {
           <div class="empty-state">
             <div class="empty-icon">⌕</div>
             <h2>No matches</h2>
-            <p>Try a different document name.</p>
+            <p>Try a different name or OCR text.</p>
           </div>
         `
     }
@@ -1746,9 +1789,17 @@ function getFilteredDocuments() {
     );
   }
 
-  return docs.filter(document =>
-    document.name.toLowerCase().includes(query)
-  );
+  // Search document names and any stored OCR text (document-wide).
+  return docs.filter(document => {
+    if (document.name.toLowerCase().includes(query)) {
+      return true;
+    }
+    return (document.pages || []).some(
+      page =>
+        typeof page.ocrText === "string" &&
+        page.ocrText.toLowerCase().includes(query)
+    );
+  });
 }
 
 function documentCard(document) {
@@ -1951,8 +2002,9 @@ function renderFolder() {
 function renderScanner() {
   // A pending capture is shown in the scanner preview so the user
   // can accept or retake it from this screen. If none is pending,
-  // show the empty capture frame instead.
+  // try live camera, otherwise show the empty capture frame.
   const pendingSrc = app.pendingImage ? resolveImageSync(app.pendingImage) : "";
+  const showLive = !pendingSrc;
 
   main.innerHTML = `
     <section class="scanner">
@@ -1961,7 +2013,8 @@ function renderScanner() {
         ${
           pendingSrc
             ? `<img src="${pendingSrc}" alt="Pending capture" />`
-            : ""
+            : `<video id="liveCameraVideo" playsinline autoplay muted style="width:100%;height:100%;object-fit:cover;background:#111;"></video>
+               <div id="cameraFallbackHint" class="scanner-preview-hint" hidden>Camera unavailable — tap the shutter to pick a photo</div>`
         }
       </div>
 
@@ -1984,6 +2037,15 @@ function renderScanner() {
             aria-label="Capture"
           ></button>
 
+          <button
+            class="scanner-control"
+            id="filePickBtn"
+            title="Choose photo from device"
+            aria-label="Choose photo from device"
+          >
+            🖼
+          </button>
+
         </div>
 
       </div>
@@ -1992,14 +2054,34 @@ function renderScanner() {
 
   document
     .getElementById("captureButton")
-    ?.addEventListener("click", chooseImage);
+    ?.addEventListener("click", () => {
+      if (app.cameraStream && document.getElementById("liveCameraVideo")) {
+        captureFromLiveCamera();
+      } else {
+        chooseImage();
+      }
+    });
 
   document
     .getElementById("importBtn")
     ?.addEventListener("click", importImagesToDocument);
 
+  document
+    .getElementById("filePickBtn")
+    ?.addEventListener("click", chooseImage);
+
   if (app.pendingImage) {
+    stopCameraStream();
     wireScannerPreviewActions();
+  } else if (showLive) {
+    startLiveCamera().then(ok => {
+      if (!ok) {
+        const hint = document.getElementById("cameraFallbackHint");
+        if (hint) {
+          hint.hidden = false;
+        }
+      }
+    });
   }
 }
 
@@ -2199,15 +2281,111 @@ function finishScanSession() {
 }
 
 
-function chooseImage() {
-  /*
-    V0 intentionally uses the browser/native file picker.
+function stopCameraStream() {
+  if (app.cameraStream) {
+    try {
+      app.cameraStream.getTracks().forEach(track => track.stop());
+    } catch (_) {
+      /* ignore */
+    }
+    app.cameraStream = null;
+  }
+  const video = document.getElementById("liveCameraVideo");
+  if (video) {
+    video.srcObject = null;
+  }
+}
 
-    Later this function becomes the native camera entry point.
-  */
+function chooseImage() {
+  // Fallback / explicit file-picker path (also used when live camera is unavailable).
+  stopCameraStream();
   imageInput.value = "";
   imageInput.multiple = false;
   imageInput.click();
+}
+
+/**
+ * Try to start a live rear-camera preview. Returns true on success.
+ * Falls back silently so the existing file-input capture still works.
+ */
+async function startLiveCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return false;
+  }
+
+  stopCameraStream();
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    });
+    app.cameraStream = stream;
+
+    const video = document.getElementById("liveCameraVideo");
+    if (video) {
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+    }
+    return true;
+  } catch (error) {
+    debugLog("Live camera unavailable:", error);
+    stopCameraStream();
+    return false;
+  }
+}
+
+/**
+ * Grab the current video frame into a JPEG blob and feed the same
+ * pipeline used by the file-input capture path.
+ */
+async function captureFromLiveCamera() {
+  const video = document.getElementById("liveCameraVideo");
+  if (!video || !app.cameraStream || video.readyState < 2) {
+    showToast("Camera is not ready yet.");
+    return;
+  }
+
+  const width = video.videoWidth || 1280;
+  const height = video.videoHeight || 720;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    showToast("Could not capture frame.");
+    return;
+  }
+  ctx.drawImage(video, 0, 0, width, height);
+
+  const blob = await new Promise(resolve =>
+    canvas.toBlob(resolve, "image/jpeg", 0.92)
+  );
+  if (!blob) {
+    showToast("Could not capture frame.");
+    return;
+  }
+
+  // Reuse the same acceptance path as file capture.
+  try {
+    const key = await storeImage(blob);
+    app.pendingImage = key;
+    app.pendingCrop = null;
+    app.pendingFilter = null;
+    app.cropDraft = null;
+    app.cropMode = false;
+    app.editorImageSize = null;
+    stopCameraStream();
+    renderScanner();
+    showToast("Page captured — review or retake.");
+  } catch (error) {
+    console.error(error);
+    showToast("Could not save the capture.");
+  }
 }
 
 function importImagesToDocument() {
@@ -5369,11 +5547,17 @@ async function exportDocumentImages(
 
 
 
-function showExportSheet(documentId) {
+async function showExportSheet(documentId) {
   const doc = getDocument(documentId);
 
   if (!doc) {
     showToast("Document not found.");
+    return;
+  }
+
+  // Soft warning before showing the sheet for large docs.
+  const ok = await warnIfLargeDocument(doc, "Export");
+  if (!ok) {
     return;
   }
 
@@ -5487,6 +5671,56 @@ document
         closeModal();
       }
     });
+}
+
+/* =========================================================
+   SOFT SIZE / PAGE WARNINGS
+   ========================================================= */
+
+/*
+ * Estimate rough export weight from page count. Used only for
+ * soft warnings — never blocks the user.
+ */
+function estimateExportWeight(doc) {
+  const pages = Array.isArray(doc?.pages) ? doc.pages.length : 0;
+  // Rough average of a processed page JPEG on mobile (~1.2–2 MB).
+  return pages * 1.5 * 1024 * 1024;
+}
+
+/**
+ * Returns true if the user wants to continue, false if they cancel.
+ * Only prompts when the document is large.
+ */
+async function warnIfLargeDocument(doc, actionLabel = "continue") {
+  if (!doc || !Array.isArray(doc.pages)) {
+    return true;
+  }
+
+  const pageCount = doc.pages.length;
+  const estimated = estimateExportWeight(doc);
+
+  if (pageCount < WARN_PAGE_COUNT && estimated < WARN_EXPORT_BYTES) {
+    return true;
+  }
+
+  const reasons = [];
+  if (pageCount >= WARN_PAGE_COUNT) {
+    reasons.push(`${pageCount} pages`);
+  }
+  if (estimated >= WARN_EXPORT_BYTES) {
+    reasons.push(`~${formatBytes(estimated)} estimated`);
+  }
+
+  return confirmAction(
+    `This document is large (${reasons.join(", ")}). ${actionLabel} may take longer and use more memory on this device.`,
+    {
+      title: "Large document",
+      confirmText: "Continue",
+      cancelText: "Cancel",
+      danger: false,
+      detail: "You can still proceed — this is only a heads-up."
+    }
+  );
 }
 
 /* =========================================================
@@ -5924,6 +6158,17 @@ function renderSettings() {
           </button>
         </div>
 
+        <div class="setting-row">
+          <div class="setting-info">
+            <strong>OCR offline</strong>
+            <small>
+              First OCR run downloads the engine and language data
+              (one-time, stays cached by the browser). After that it
+              works offline for the selected language.
+            </small>
+          </div>
+        </div>
+
         <button
           id="clearDataBtn"
           class="danger-btn"
@@ -5939,10 +6184,11 @@ function renderSettings() {
     <section class="section">
       <div class="empty-state">
         <div class="empty-icon">✓</div>
-        <h2>SmartScan V1.10.3</h2>
+        <h2>SmartScan V${APP_VERSION}</h2>
         <p>
           Local-first document scanning with multi-page capture,
-          editing, PDF/JPG/PNG export, and native sharing.
+          editing, on-device OCR, PDF/JPG/PNG export, and native sharing.
+          Everything stays on this device — no account, no cloud.
         </p>
       </div>
     </section>
@@ -6187,6 +6433,14 @@ helpBtn.addEventListener("click", () => {
   showHelpModal();
 });
 
+// Always release the camera when the page is hidden or unloaded.
+window.addEventListener("pagehide", stopCameraStream);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopCameraStream();
+  }
+});
+
 document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
     const route = item.dataset.route;
@@ -6279,7 +6533,7 @@ let appInitialization = (async () => {
   if (navigator.storage?.persist) {
     try {
       const persistent = await navigator.storage.persist();
-      console.log("Persistent storage:", persistent);
+      debugLog("Persistent storage:", persistent);
     } catch {}
   }
 
@@ -6287,7 +6541,7 @@ let appInitialization = (async () => {
   if (navigator.storage?.estimate) {
     try {
       const { usage, quota } = await navigator.storage.estimate();
-      console.log(
+      debugLog(
         `Storage: ${(usage / 1024 / 1024).toFixed(1)} MB / ` +
         `${(quota / 1024 / 1024).toFixed(1)} MB`
       );
@@ -6309,7 +6563,7 @@ let appInitialization = (async () => {
   if ("serviceWorker" in navigator) {
     try {
       const registration = await navigator.serviceWorker.register("./sw.js");
-      console.log("SmartScan service worker registered.");
+      debugLog("SmartScan service worker registered.");
 
       // Check for updates periodically and when user returns to tab
       let updateCheckInterval;

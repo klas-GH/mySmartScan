@@ -5,7 +5,7 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
 
 ## Features
 
-- Scan multiple pages into one document (camera or file import).
+- Scan multiple pages into one document (live camera preview + shutter, or file import).
 - Import existing images from device gallery/files into new or existing documents.
 - Crop, rotate and apply filters (Original, Grayscale, Black & White, Enhance).
 - Lossless re-editing: the original image is preserved, so edits never compound.
@@ -14,11 +14,13 @@ documents into clean, shareable PDFs, JPGs and PNGs — entirely on your device.
     Chinese (Simplified), Japanese, Korean, Russian, Arabic.
   - Configurable preprocessing: adaptive (resize+grayscale+binarize), grayscale only, or none.
   - Configurable page segmentation (PSM): auto, single block, single line, word, raw line.
+  - Document search includes OCR text once pages have been recognized.
+- Soft warnings before export/OCR on very large documents.
 - Organize documents into folders.
 - Export as PDF, JPG or PNG. Multi-page JPG/PNG exports bundle into a ZIP.
 - Share through the native share sheet when supported, otherwise download.
 - Light / dark / system theme.
-- PWA: installable, **app shell works offline**; OCR requires cached Tesseract.js and language data.
+- PWA: installable, **app shell works offline**; OCR needs a one-time online download of the engine and language data (then works offline for that language).
 - Documents and app data stay on this device. No account or cloud storage.
 - Documents with zero pages are automatically removed from views.
 
@@ -50,7 +52,7 @@ SmartScan works in modern browsers that support IndexedDB, the Clipboard API and
 
 ## Version
 
-1.10.3.
+1.10.4.
 
 ## License
 
