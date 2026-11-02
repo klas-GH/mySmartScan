@@ -1,11 +1,11 @@
 /* =========================================================
-   SmartScan V1.10.6
+   SmartScan V1.10.7
    ---------------------------------------------------------
    Architecture intentionally keeps UI, state and storage
    separated so native capabilities can be added later.
    ========================================================= */
 
-const APP_VERSION = "1.10.6";
+const APP_VERSION = "1.10.7";
 
 /* Set to true only while debugging. Production builds stay quiet. */
 const DEBUG = false;
@@ -1157,6 +1157,9 @@ function showOcrResultModal(page) {
     page.ocrText = null;
     const doc = getDocument(app.activeDocumentId);
     if (doc) {
+      if (doc.__searchMatch) {
+        delete doc.__searchMatch;
+      }
       doc.updatedAt = now();
       saveState();
     }
@@ -1192,6 +1195,9 @@ function showOcrErrorModal(page, message) {
     page.ocrText = null;
     const doc = getDocument(app.activeDocumentId);
     if (doc) {
+      if (doc.__searchMatch) {
+        delete doc.__searchMatch;
+      }
       doc.updatedAt = now();
       saveState();
     }
@@ -1543,6 +1549,13 @@ function navigate(route, options = {}) {
     stopCameraStream();
   }
 
+  // Leaving the Documents list (via back, menu, or any path) must
+  // clear search + bulk selection so a previous query never sticks
+  // and makes the list look empty on return.
+  if (app.route === "documents" && route !== "documents") {
+    clearDocumentsListUiState();
+  }
+
   app.route = route;
 
   // Render synchronously if initialization has already completed.
@@ -1789,14 +1802,40 @@ function emptyDocuments() {
    DOCUMENTS
    ========================================================= */
 
+/**
+ * Drop ephemeral search-match metadata from every document.
+ * Keeps document objects clean after the query changes or is cleared.
+ */
+function clearSearchMatchMetadata() {
+  for (const doc of state.documents || []) {
+    if (doc && Object.prototype.hasOwnProperty.call(doc, "__searchMatch")) {
+      delete doc.__searchMatch;
+    }
+  }
+}
+
+/**
+ * Clear the Documents search box and bulk-selection state.
+ * Called when leaving the documents route so a previous query
+ * never "sticks" and makes the list look empty on return.
+ */
+function clearDocumentsListUiState() {
+  app.searchQuery = "";
+  app.selectedDocumentIds = [];
+  clearSearchMatchMetadata();
+}
+
 function renderDocuments() {
   const filtered = getFilteredDocuments();
   const selectedCount = (app.selectedDocumentIds || []).length;
+  const hasQuery = app.searchQuery.trim().length > 0;
 
   main.innerHTML = `
     <div class="page-heading">
       <h1>Documents</h1>
-      <p>${filtered.length} document${filtered.length === 1 ? "" : "s"}</p>
+      <p>${filtered.length} document${filtered.length === 1 ? "" : "s"}${
+        hasQuery ? " matching" : ""
+      }</p>
     </div>
 
     <input
@@ -1822,11 +1861,19 @@ function renderDocuments() {
         ? `<div class="document-list">
             ${filtered.map(documentCard).join("")}
            </div>`
-        : `
+        : hasQuery
+          ? `
           <div class="empty-state">
             <div class="empty-icon">⌕</div>
             <h2>No matches</h2>
             <p>Try a different name or OCR text.</p>
+          </div>
+        `
+          : `
+          <div class="empty-state">
+            <div class="empty-icon">▣</div>
+            <h2>No documents yet</h2>
+            <p>Scan or import a document to get started.</p>
           </div>
         `
     }
@@ -1859,6 +1906,10 @@ function getFilteredDocuments() {
   let docs = state.documents.filter(doc =>
     Array.isArray(doc.pages) && doc.pages.length > 0
   );
+
+  // Always strip stale match metadata first so a previous search
+  // cannot leave __searchMatch on documents that no longer match.
+  clearSearchMatchMetadata();
 
   if (!query) {
     return [...docs].sort(
@@ -3481,6 +3532,11 @@ async function usePage() {
         existingPage.crop = crop;
         // Image changed — previous OCR text is no longer valid.
         existingPage.ocrText = null;
+        // Drop any search-match side channel so badges / search
+        // results cannot show a stale OCR hit for this page.
+        if (doc.__searchMatch) {
+          delete doc.__searchMatch;
+        }
 
         doc.updatedAt = now();
 
@@ -6715,8 +6771,12 @@ document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
     const route = item.dataset.route;
 
-    if (route === "home") {
-      app.searchQuery = "";
+    // Leaving the Documents list must not leave a previous search
+    // query (or bulk selection) active — that made the list look
+    // empty when the user returned. Keep the query only while the
+    // user stays on the documents route.
+    if (route !== "documents") {
+      clearDocumentsListUiState();
     }
 
     navigate(route);

@@ -17,7 +17,7 @@
  *   - fetch: serve from cache, falling back to the network.
  */
 
-const CACHE_NAME = "smartscan-shell-v6";
+const CACHE_NAME = "smartscan-shell-v7";
 
 const SHELL_FILES = [
   "./",
