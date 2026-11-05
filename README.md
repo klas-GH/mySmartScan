@@ -53,6 +53,14 @@ python -m http.server 8080
 
 Then visit `http://localhost:8080/`.
 
+## Tests
+
+Run the dependency-free test suites with Node.js:
+
+```bash
+node tests/run.js
+```
+
 ## Browser support
 
 SmartScan works in modern browsers that support IndexedDB, the Clipboard API and Tesseract.js.

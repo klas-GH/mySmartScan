@@ -1358,6 +1358,7 @@ body.dark .danger-btn {
   }
 
   select {
+    width: 100%;
     padding: 8px 10px;
     font-size: 13px;
   }

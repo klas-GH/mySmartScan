@@ -6,7 +6,6 @@ app_report.txt
 startSrvLocal.bat
 make_icons.py
 __pycache__/
-tests/
 Functional Feature Report.txt
 startSrvLocal.bat
 new_03_upgradeHelpBt.txt

@@ -17,7 +17,7 @@
  *   - fetch: serve from cache, falling back to the network.
  */
 
-const CACHE_NAME = "smartscan-shell-v7";
+const CACHE_NAME = "smartscan-shell-v9";
 
 const SHELL_FILES = [
   "./",
@@ -34,7 +34,11 @@ self.addEventListener("install", event => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then(cache => cache.addAll(SHELL_FILES))
+      .then(cache =>
+        cache.addAll(
+          SHELL_FILES.map(file => new Request(file, { cache: "reload" }))
+        )
+      )
       .then(() => self.skipWaiting())
   );
 });
