@@ -14,6 +14,7 @@ correction, or a full desktop document suite.
 ## Features
 
 - Scan multiple pages into one document (live camera preview + shutter, or file import).
+- High-resolution live camera capture requests up to 4K when supported; OCR keeps up to 2800px of image detail.
 - Import existing images from device gallery/files into new or existing documents.
 - Crop, rotate and apply filters (Original, Grayscale, Black & White, Enhance).
 - Lossless re-editing: the original image is preserved, so edits never compound.
@@ -70,7 +71,7 @@ SmartScan works in modern browsers that support IndexedDB, the Clipboard API and
 
 ## Version
 
-1.10.7.
+1.10.8.
 
 ## License
 

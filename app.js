@@ -1,11 +1,11 @@
 /* =========================================================
-   SmartScan V1.10.7
+   SmartScan V1.10.8
    ---------------------------------------------------------
    Architecture intentionally keeps UI, state and storage
    separated so native capabilities can be added later.
    ========================================================= */
 
-const APP_VERSION = "1.10.7";
+const APP_VERSION = "1.10.8";
 
 /* Set to true only while debugging. Production builds stay quiet. */
 const DEBUG = false;
@@ -769,8 +769,8 @@ async function preprocessForOcr(dataUrl, mode = "adaptive") {
     const img = new Image();
     img.onload = () => {
       try {
-        // Limit OCR image to a maximum dimension of 2000px
-        const MAX_DIM = 2000;
+        // Keep enough detail for small print while bounding mobile memory use.
+        const MAX_DIM = 2800;
         let { naturalWidth: w, naturalHeight: h } = img;
         const scale = Math.min(1, MAX_DIM / Math.max(w, h));
         w = Math.round(w * scale);
@@ -1669,6 +1669,11 @@ function updateNavigation() {
 }
 
 function updateHeader() {
+  document.body.classList.toggle(
+    "capture-workflow",
+    ["scanner", "page-editor", "scan-session"].includes(app.route)
+  );
+
   const titles = {
     home: ["Documents", "Your documents, simplified."],
     documents: ["Documents", "Everything you've scanned."],
@@ -2519,8 +2524,8 @@ async function startLiveCamera() {
       audio: false,
       video: {
         facingMode: { ideal: "environment" },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { ideal: 3840 },
+        height: { ideal: 2160 }
       }
     });
     app.cameraStream = stream;
@@ -2896,9 +2901,24 @@ function resizeCrop(crop, corner, dx, dy) {
 
 function renderCropOverlay() {
   const rect = document.getElementById("cropRect");
+  const overlay = document.getElementById("cropOverlay");
 
-  if (!rect) {
+  if (!rect || !overlay) {
     return;
+  }
+
+  const image = document.getElementById("editorImage");
+  const stage = overlay.parentElement;
+
+  if (image?.naturalWidth && stage) {
+    const stageBounds = stage.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+
+    overlay.style.inset = "auto";
+    overlay.style.left = `${imageBounds.left - stageBounds.left}px`;
+    overlay.style.top = `${imageBounds.top - stageBounds.top}px`;
+    overlay.style.width = `${imageBounds.width}px`;
+    overlay.style.height = `${imageBounds.height}px`;
   }
 
   const crop = app.cropDraft || FULL_CROP;
@@ -2908,6 +2928,12 @@ function renderCropOverlay() {
   rect.style.width = (crop.w * 100) + "%";
   rect.style.height = (crop.h * 100) + "%";
 }
+
+window.addEventListener("resize", () => {
+  if (app.cropMode) {
+    renderCropOverlay();
+  }
+});
 
 function onCropPointerDown(event) {
   const handle = event.target.closest("[data-crop-handle]");
@@ -3107,6 +3133,10 @@ function wireEditorImage() {
 
     if (!width || !height) {
       return;
+    }
+
+    if (app.cropMode) {
+      renderCropOverlay();
     }
 
     const known = app.editorImageSize;
@@ -6944,4 +6974,3 @@ let appInitialization = (async () => {
   appInitializationComplete = true;
 })();
 // runZipSelfTest();
-

@@ -1287,9 +1287,10 @@ body.dark .danger-btn {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 480px), (max-height: 600px) and (max-width: 900px) {
   :root {
     --nav-height: 64px;
+    --topbar-height: max(64px, calc(50px + env(safe-area-inset-top, 0px)));
   }
 
   .scan-fab {
@@ -1372,5 +1373,275 @@ body.dark .danger-btn {
     width: 44px;
     height: 56px;
     border-radius: 8px;
+  }
+
+  .capture-workflow #app,
+  .capture-workflow .main {
+    padding-bottom: 0;
+  }
+
+  .capture-workflow #app {
+    height: calc(100vh - var(--nav-height));
+    height: calc(100dvh - var(--nav-height));
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .capture-workflow .topbar {
+    flex: 0 0 auto;
+  }
+
+  .capture-workflow .main {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+    padding-top: 8px;
+  }
+
+  .scanner {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-left: -12px;
+    margin-right: -12px;
+  }
+
+  .scanner-preview {
+    flex: 1 1 0;
+    min-height: 0;
+    margin: 12px;
+  }
+
+  .scanner-controls {
+    padding: 8px 18px max(16px, env(safe-area-inset-bottom));
+  }
+
+  .capture-workflow .page-heading {
+    margin: 0 0 8px;
+  }
+
+  .capture-workflow .page-heading h1 {
+    font-size: 22px;
+  }
+
+  .capture-workflow .page-heading p {
+    font-size: 12px;
+  }
+
+  .capture-workflow .editor-preview {
+    height: auto;
+    flex: 1 1 0;
+    min-height: 0;
+    margin-bottom: 12px;
+  }
+
+  .capture-workflow .editor-preview .crop-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .capture-workflow .editor-preview .crop-stage > img {
+    max-height: 100%;
+  }
+
+  .capture-workflow .editor-preview > .crop-result {
+    max-height: 100%;
+    max-width: 100%;
+  }
+
+  .capture-workflow .editor-tools {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .capture-workflow .tool-btn {
+    min-height: 54px;
+  }
+
+  .capture-workflow .section {
+    flex: 0 0 auto;
+    margin-bottom: 10px;
+  }
+
+  .capture-workflow .filter-row {
+    margin-bottom: 10px;
+  }
+
+  .scan-session > .section {
+    flex: 0 0 auto;
+    margin-top: 8px !important;
+  }
+
+  .scan-session {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .scan-session .editor-preview {
+    height: auto;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .scan-session .editor-preview img {
+    max-height: 100%;
+  }
+
+  .scan-session .empty-state {
+    padding: 12px;
+  }
+
+  .scan-session .empty-icon {
+    display: none;
+  }
+
+  .scan-session .empty-state p {
+    display: none;
+  }
+
+  .scan-session .empty-state > div:last-child {
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin-top: 10px !important;
+  }
+
+  .scan-session .empty-state > div:last-child button {
+    width: auto !important;
+    min-width: 0;
+    flex: 1;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+}
+
+@media (max-height: 500px) and (max-width: 900px) {
+  :root {
+    --nav-height: 54px;
+    --topbar-height: 44px;
+  }
+
+  .capture-workflow .topbar {
+    min-height: 44px;
+    padding: 4px 12px;
+  }
+
+  .capture-workflow .brand-mark {
+    width: 30px;
+    height: 30px;
+    font-size: 16px;
+  }
+
+  .capture-workflow .icon-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .capture-workflow .main {
+    padding-top: 4px;
+  }
+
+  .capture-workflow .page-heading {
+    margin-bottom: 4px;
+  }
+
+  .capture-workflow .page-heading h1 {
+    font-size: 20px;
+  }
+
+  .capture-workflow .page-heading p,
+  .capture-workflow .section-header {
+    display: none;
+  }
+
+  .capture-workflow .editor-preview {
+    height: auto;
+    flex: 1 1 0;
+    margin-bottom: 6px;
+  }
+
+  .capture-workflow .editor-preview .crop-stage > img,
+  .capture-workflow .editor-preview > .crop-result {
+    max-height: 100%;
+  }
+
+  .capture-workflow .editor-tools {
+    margin-bottom: 4px;
+    gap: 4px;
+  }
+
+  .capture-workflow .tool-btn {
+    min-height: 34px;
+  }
+
+  .capture-workflow .tool-btn span:first-child {
+    font-size: 16px;
+  }
+
+  .capture-workflow .filter-btn {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .capture-workflow .section,
+  .capture-workflow .filter-row {
+    margin-bottom: 4px;
+  }
+
+  .capture-workflow .primary-btn,
+  .capture-workflow .secondary-btn {
+    min-height: 40px;
+  }
+
+  .scanner-preview {
+    margin: 8px;
+  }
+
+  .scanner-control {
+    width: 38px;
+    height: 38px;
+  }
+
+  .capture-button {
+    width: 60px;
+    height: 60px;
+  }
+
+  .capture-row {
+    gap: 16px;
+  }
+
+  .scanner-controls {
+    padding-top: 4px;
+    padding-bottom: 12px;
+  }
+
+  .scan-session .empty-icon {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 4px;
+    font-size: 20px;
+  }
+
+  .scan-session .empty-state {
+    padding: 8px 12px;
+  }
+
+  .scan-session .empty-state > div:last-child {
+    flex-direction: row !important;
+    margin-top: 6px !important;
+  }
+
+  .scan-session .empty-state > div:last-child button {
+    min-height: 36px;
+    padding: 0 8px;
   }
 }

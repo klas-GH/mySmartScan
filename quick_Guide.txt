@@ -1,4 +1,4 @@
-SmartScan — Quick Guide v1.10.7
+SmartScan — Quick Guide v1.10.8
 
 Complete loop: Scan → Edit → OCR (optional) → Organize → Export / Share
 Everything runs on this device. No account. No cloud.
