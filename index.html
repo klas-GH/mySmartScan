@@ -17,6 +17,7 @@
     #installBanner button { border: 0; border-radius: 9px; padding: 9px 12px; font: inherit; cursor: pointer; }
     #installBanner #installBtn { background: var(--primary); color: white; font-weight: 700; }
     #installBanner #installLater { background: var(--surface-2); color: var(--text); }
+    #installBanner .install-hint { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
     @media (max-width: 480px) { #installBanner { align-items: stretch; flex-direction: column; } #installBanner .install-actions button { flex: 1; } }
   </style>
 </head>
@@ -111,8 +112,11 @@
   <script>
     (() => {
       const banner = document.getElementById("installBanner");
+      const bodyText = banner.querySelector("div:first-child");
       let deferredPrompt = null;
       let dismissed = false;
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
       const standalone = () =>
         window.matchMedia?.("(display-mode: standalone)").matches ||
         navigator.standalone === true;
@@ -122,22 +126,42 @@
         dismissed = true;
         hide();
       };
+      const clearHint = () => {
+        const hint = banner.querySelector(".install-hint");
+        if (hint) hint.remove();
+      };
 
       document.getElementById("installBtn").addEventListener("click", () => {
-        if (!deferredPrompt) {
-          window.alert("Use the install icon near the address bar or choose your browser menu's app-install option. On iPhone or iPad, use Share > Add to Home Screen.");
+        clearHint();
+        if (deferredPrompt) {
+          // Real PWA install path (Chrome / Edge / Android): trigger the
+          // native install dialog so the app actually gets installed.
+          const prompt = deferredPrompt;
+          deferredPrompt = null;
+          Promise.resolve(prompt.prompt()).catch(error =>
+            console.error("PWA install prompt failed:", error)
+          );
+          prompt.userChoice?.catch(error =>
+            console.error("PWA install choice failed:", error)
+          );
+          hide();
           return;
         }
-        const prompt = deferredPrompt;
-        deferredPrompt = null;
-        Promise.resolve(prompt.prompt()).catch(error => console.error("PWA install prompt failed:", error));
-        prompt.userChoice?.catch(error => console.error("PWA install choice failed:", error));
-        hide();
+        // No beforeinstallprompt (e.g. iOS Safari): cannot auto-install via JS.
+        // Show platform-specific instructions inline instead of a dead-end alert.
+        const msg = isIOS
+          ? "Open the Share menu and tap “Add to Home Screen” to install SmartScan."
+          : "Use the install icon near the address bar, or your browser menu’s “Install app” option.";
+        const hint = document.createElement("p");
+        hint.className = "install-hint";
+        hint.textContent = msg;
+        bodyText.appendChild(hint);
       });
       document.getElementById("installLater").addEventListener("click", dismiss);
       window.addEventListener("beforeinstallprompt", event => {
         event.preventDefault();
         deferredPrompt = event;
+        clearHint();
         show();
       });
       window.addEventListener("appinstalled", () => {
